@@ -38,6 +38,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val ble by viewModel.bleTxEnabled.collectAsStateWithLifecycle()
     val dircon by viewModel.dirConEnabled.collectAsStateWithLifecycle()
     val ant by viewModel.antPlusTxEnabled.collectAsStateWithLifecycle()
+    val realWorldSpeed by viewModel.realWorldSpeed.collectAsStateWithLifecycle()
     val running by viewModel.isOverlayRunning.collectAsStateWithLifecycle()
     val background by viewModel.backgroundLocationGranted.collectAsStateWithLifecycle()
     val hr by viewModel.hrConnectedDevice.collectAsStateWithLifecycle()
@@ -153,6 +154,11 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             Text(if (viewModel.isTread) "Tread · Speed & incline" else "Bike · Live telemetry", fontSize = 18.sp, lineHeight = 22.sp)
                             Text("Model ${Build.MODEL}   ·   Android ${Build.VERSION.RELEASE}", fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
                             Text(if (externalWatts != null) "Power source: external meter" else "Power source: built-in sensors", fontSize = 13.sp, lineHeight = 17.sp)
+                            // The Bike derives speed from power; a Tread measures it, so the choice only applies to bikes.
+                            if (!viewModel.isTread) {
+                                Spacer(Modifier.height(10.dp))
+                                SettingSwitch("Real-world speed", realWorldSpeed, viewModel::onRealWorldSpeedClicked)
+                            }
                             Spacer(Modifier.weight(1f))
                             TileActionButton("Version & updates", { dialog = "about" })
                         }

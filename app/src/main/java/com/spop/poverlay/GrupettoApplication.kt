@@ -53,6 +53,8 @@ class GrupettoApplication : Application() {
             Timber.plant(Timber.DebugTree())
         }
 
+        com.spop.poverlay.util.SpeedModel.load(getSharedPreferences(configurationPreferencesName, MODE_PRIVATE))
+
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         powerMeterManager = com.spop.poverlay.sensor.power.PowerMeterManager(this)
         val bike = createSensorInterface()

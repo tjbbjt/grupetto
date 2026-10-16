@@ -175,6 +175,14 @@ class ConfigurationViewModel(
         }
     }
 
+    val realWorldSpeed get() = com.spop.poverlay.util.SpeedModel.realWorld
+
+    fun onRealWorldSpeedClicked(isChecked: Boolean) {
+        val app = getApplication<Application>() as GrupettoApplication
+        com.spop.poverlay.util.SpeedModel.set(
+            app.getSharedPreferences(app.configurationPreferencesName, Context.MODE_PRIVATE), isChecked)
+    }
+
     fun onShowTimerWhenMinimizedClicked(isChecked: Boolean) {
         configurationRepository.setShowTimerWhenMinimized(isChecked)
     }

@@ -1,9 +1,10 @@
 package com.spop.poverlay.sensor.interfaces
 
-import com.spop.poverlay.util.calculateSpeedFromPelotonV1Power
+import com.spop.poverlay.util.SpeedModel
+import com.spop.poverlay.util.speedMphForModel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 
 /** Distinguishes the kind of Peloton hardware backing a [SensorInterface]. */
 enum class DeviceType { Bike, Tread }
@@ -16,8 +17,14 @@ interface SensorInterface {
     val usesExternalPower: Flow<Boolean> get() = flowOf(false)
     val cadence: Flow<Float>
     val resistance: Flow<Float>
-    val speed
-        get() = power.map(::calculateSpeedFromPelotonV1Power)
+    /**
+     * Bike speed is derived from power (the Bike has no speed sensor). The formula follows the
+     * "Real-world speed" setting: Peloton's own display scale (default) or a flat-road estimate.
+     */
+    val speed: Flow<Float>
+        get() = combine(power, SpeedModel.realWorld) { watts, realWorld ->
+            speedMphForModel(watts, realWorld)
+        }
 
     /** Incline (percent grade). Meaningful only for treadmills; bikes report none. */
     val incline: Flow<Float>

@@ -1,0 +1,52 @@
+name: Fork APK (no signing secrets)
+
+# Builds an installable APK on a fork without any repository secrets.
+# The upstream "Android CI/CD" workflow runs only for develop/main and fails closed without
+# signing secrets, so this one runs for every other branch and can be started by hand
+# (Actions tab > "Fork APK (no signing secrets)" > Run workflow).
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [ "develop", "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Create debug keystore
+      # app/build.gradle falls back to this keystore when keystore.properties is absent.
+      run: |
+        mkdir -p ~/.android
+        if [ ! -f ~/.android/debug.keystore ]; then
+          keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US" -storetype JKS
+        fi
+
+    - name: Run unit tests
+      # Reported but non-blocking so a build is still produced if an unrelated test fails.
+      continue-on-error: true
+      run: ./gradlew testDebugUnitTest
+
+    - name: Build APK
+      run: ./gradlew assembleRelease
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: grupetto-apk
+        path: app/build/outputs/apk/release/app-release.apk
