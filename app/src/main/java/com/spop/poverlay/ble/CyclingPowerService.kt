@@ -59,9 +59,11 @@ class CyclingPowerService(server: BleServer) : BaseBleService(server) {
 
         val powerValue = power.toInt()
 
-        // Use shared CSC counters from server (1/1024s timers, LE wrapping)
+        // Use shared CSC counters from server (1/1024s timers, LE wrapping). The Cycling Power
+        // Measurement counts wheel event time in 1/2048s (crank time stays 1/1024s), so the wheel
+        // time must be converted or readers compute twice the real speed.
         val wheelRevs = server.cscCumulativeWheelRev
-        val wheelTime = server.cscLastWheelEvtTime and 0xFFFF
+        val wheelTime = cyclingPowerWheelEventTime(server.cscLastWheelEvtTime)
         val crankRevs = server.cscCumulativeCrankRev and 0xFFFF
         val crankTime = server.cscLastCrankEvtTime and 0xFFFF
 
@@ -96,3 +98,6 @@ class CyclingPowerService(server: BleServer) : BaseBleService(server) {
         }
     }
 }
+
+/** Converts the shared 1/1024s wheel event time to the 1/2048s unit used by Cycling Power. */
+internal fun cyclingPowerWheelEventTime(ticks1024: Int): Int = (ticks1024 * 2) and 0xFFFF
