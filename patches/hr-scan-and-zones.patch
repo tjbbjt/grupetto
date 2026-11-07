@@ -97,10 +97,10 @@ index 0000000..a62ad24
 +    }
 +}
 diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-index c2f33a6..349cdac 100644
+index c2f33a6..4a5f0fe 100644
 --- a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
 +++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-@@ -1,23 +1,67 @@
+@@ -1,23 +1,69 @@
  package com.spop.poverlay
  
  import androidx.compose.foundation.layout.*
@@ -156,7 +156,9 @@ index c2f33a6..349cdac 100644
 +
 +    // The on-screen keyboard can cover the boxes, so report which zone boundary is being edited;
 +    // the dialog shows it in a banner at its top.
-+    val editing = if (focusedIndex in values.indices) "Editing zone ${focusedIndex + 1} to ${focusedIndex + 2}" else null
++    val editing = if (focusedIndex in values.indices) {
++        "Editing zone ${focusedIndex + 1} to ${focusedIndex + 2}:  ${values[focusedIndex].ifEmpty { "_" }}"
++    } else null
 +    LaunchedEffect(editing) { latestOnEditing(editing) }
 +    val entered = values.map { it.toIntOrNull() }
 +    if (entered.all { it != null } && entered.zipWithNext().any { (a, b) -> a!! >= b!! }) {
@@ -170,7 +172,7 @@ index c2f33a6..349cdac 100644
      BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
          val columns = if (maxWidth >= 480.dp) 4 else 2
          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-@@ -29,8 +73,22 @@ internal fun HeartRateZoneSettings(stored: List<Int?>, onChange: (List<Int?>) ->
+@@ -29,8 +75,22 @@ internal fun HeartRateZoneSettings(stored: List<Int?>, onChange: (List<Int?>) ->
                              onChange(values.map { it.toIntOrNull() })
                          // Use words: the bundled font does not contain the right-arrow glyph.
                          }, label = { Text("${index + 1} to ${index + 2}") }, singleLine = true,
