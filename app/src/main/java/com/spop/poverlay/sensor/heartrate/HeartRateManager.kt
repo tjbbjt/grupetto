@@ -42,6 +42,8 @@ object HeartRateManager {
 
     private const val ReconnectDelayMs = 3_000L
     private const val AutoReconnectScanMs = 10_000L
+    // After the bike first moves, scan flat out for a saved strap for this long.
+    private const val MovementScanWindowMs = 30_000L
     private const val StaleHeartRateTimeoutMs = 12_000L
     // Android abandons a direct connectGatt after about 30 s; do not restart a
     // pending attempt to the same strap sooner. Straps already serving other
@@ -122,6 +124,9 @@ object HeartRateManager {
     private var isManaging = false
     @Volatile
     private var manualDisconnectRequested = false
+
+    @Volatile
+    private var movementScanUntilMs = 0L
 
     @Volatile
     private var lastHeartRateAtMs: Long = 0L
@@ -298,6 +303,21 @@ object HeartRateManager {
         discoveryCallback = null
         _isScanning.value = false
         if (callback != null) bluetoothAccess?.stopScan(callback)
+    }
+
+    /**
+     * Called when the bike starts moving. If a saved strap is not connected, scan continuously at
+     * full speed for [MovementScanWindowMs] so it is picked up without opening settings.
+     * Does nothing after a manual disconnect, with no saved strap, or while a strap is connected.
+     */
+    @Synchronized
+    fun scanForSavedStrapAfterMovement() {
+        if (stopped.get() || manualDisconnectRequested || bluetoothGatt != null) return
+        if (_savedDevices.value.isEmpty()) return
+        movementScanUntilMs = monotonicTimeMs() + MovementScanWindowMs
+        // Restart so a slow background scan is replaced by a fast one right away.
+        stopDiscovery()
+        startDiscovery(ScanSettings.SCAN_MODE_LOW_LATENCY)
     }
 
     /** The matching pairing picker is visible, not merely the settings screen. */
@@ -606,11 +626,15 @@ object HeartRateManager {
             }
         }
         if (!shouldScan()) { stopDiscovery(); updateIdleStatus(); return }
-        if (_isScanning.value && now - scanStartedAtMs >= AutoReconnectScanMs) {
+        val movementScan = now < movementScanUntilMs
+        if (_isScanning.value && !movementScan && now - scanStartedAtMs >= AutoReconnectScanMs) {
             stopDiscovery()
             nextScanAtMs = now + ReconnectDelayMs
         } else if (!_isScanning.value && now >= nextScanAtMs) {
-            startDiscovery(if (isManaging) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_LOW_POWER)
+            startDiscovery(
+                if (isManaging || movementScan) ScanSettings.SCAN_MODE_LOW_LATENCY
+                else ScanSettings.SCAN_MODE_LOW_POWER
+            )
         }
     }
 }

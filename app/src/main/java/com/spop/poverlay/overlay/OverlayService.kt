@@ -192,6 +192,15 @@ class OverlayService : LifecycleEnabledService() {
         // Wire up timer to auto-start/pause based on movement
         timerViewModel.observeMovement(sensorViewModel.isMoving, sensorViewModel.sessionReset)
 
+        // When the bike starts moving, look hard for a saved heart-rate strap that is not connected.
+        lifecycleScope.launch {
+            var wasMoving = false
+            sensorViewModel.isMoving.collect { moving ->
+                if (moving && !wasMoving) HeartRateManager.scanForSavedStrapAfterMovement()
+                wasMoving = moving
+            }
+        }
+
         val dialogViewModel = OverlayDialogViewModel(
             screenSize,
             sensorViewModel.isMinimized,
