@@ -1,3 +1,32 @@
+diff --git a/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt b/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
+index 5c18376..5b25b6e 100644
+--- a/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
++++ b/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
+@@ -17,7 +17,7 @@ import org.junit.Test
+ class HeartRateZoneSettingsTest {
+     @get:Rule val compose = createComposeRule()
+ 
+-    @Test fun zoneLabelsUseSupportedTextAndKeepEditableBoundaries() {
++    @Test fun zoneLabelsUseSupportedTextAndKeypadEditsBoundaries() {
+         var updated: List<Int?>? = null
+         compose.setContent { MaterialTheme(typography = Typography) { Column {
+             HeartRateZoneSettings(listOf(108, 126, 144, 162)) { updated = it }
+@@ -25,10 +25,12 @@ class HeartRateZoneSettingsTest {
+         listOf("1 to 2", "2 to 3", "3 to 4", "4 to 5").forEach {
+             compose.onNodeWithText(it).assertIsDisplayed()
+         }
+-        compose.onNodeWithText("1 to 2").performTextReplacement("115")
++        // The keypad only appears once a box is picked; the first key replaces the old number.
++        compose.onNodeWithText("1 to 2").performClick()
++        listOf("1", "1", "5").forEach { compose.onNodeWithText(it).performClick() }
+         compose.runOnIdle { assertEquals(listOf(115, 126, 144, 162), updated) }
+-        compose.onNodeWithText("1 to 2").performTextClearance()
+-        compose.runOnIdle { assertEquals(listOf(null, 126, 144, 162), updated) }
++        compose.onNodeWithText("Del").performClick()
++        compose.runOnIdle { assertEquals(listOf(11, 126, 144, 162), updated) }
+     }
+ 
+     @Test fun boundariesWrapIntoTwoRowsOnNarrowDialogsAndStayInOneRowWhenWide() {
 diff --git a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
 index 1973b24..c1da646 100644
 --- a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
@@ -97,28 +126,35 @@ index 0000000..a62ad24
 +    }
 +}
 diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-index c2f33a6..4a5f0fe 100644
+index c2f33a6..cddd317 100644
 --- a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
 +++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-@@ -1,23 +1,69 @@
+@@ -1,36 +1,142 @@
  package com.spop.poverlay
  
++import androidx.compose.foundation.border
++import androidx.compose.foundation.clickable
  import androidx.compose.foundation.layout.*
-+import androidx.compose.foundation.text.KeyboardActions
- import androidx.compose.foundation.text.KeyboardOptions
- import androidx.compose.material.OutlinedTextField
+-import androidx.compose.foundation.text.KeyboardOptions
+-import androidx.compose.material.OutlinedTextField
++import androidx.compose.foundation.shape.RoundedCornerShape
  import androidx.compose.material.Text
  import androidx.compose.runtime.*
++import androidx.compose.ui.Alignment
  import androidx.compose.ui.Modifier
-+import androidx.compose.ui.focus.onFocusChanged
 +import androidx.compose.ui.graphics.Color
-+import androidx.compose.ui.platform.LocalFocusManager
  import androidx.compose.ui.text.font.FontWeight
-+import androidx.compose.ui.text.input.ImeAction
- import androidx.compose.ui.text.input.KeyboardType
+-import androidx.compose.ui.text.input.KeyboardType
  import androidx.compose.ui.unit.dp
  import androidx.compose.ui.unit.sp
  
++private val SelectedBorder = Color(0xFF7DD3FC)
++private val IdleBorder = Color(0x66FFFFFF)
++
++/**
++ * Four heart-rate zone boundaries, entered on a small keypad drawn inside the dialog. The system
++ * keyboard is never opened, so it cannot cover the boxes (it takes half the screen on the bike).
++ */
  @Composable
 -internal fun HeartRateZoneSettings(stored: List<Int?>, onChange: (List<Int?>) -> Unit) {
 +internal fun HeartRateZoneSettings(
@@ -128,38 +164,64 @@ index c2f33a6..4a5f0fe 100644
 +) {
      Text("Zone boundaries (bpm)", fontWeight = FontWeight.SemiBold)
 -    Text("Leave a boundary blank to use the default.", fontSize = 13.sp)
-+    Text("Enter any one boundary and tap Done: the others are worked out at 60/70/80/90% of max heart rate. Boxes you typed yourself are kept.", fontSize = 13.sp)
++    Text("Tap a box, enter a number on the keypad and tap Done: the others are worked out at 60/70/80/90% of max heart rate. Boxes you typed yourself are kept.", fontSize = 13.sp)
      val values = remember(stored) {
          mutableStateListOf(*stored.map { it?.toString() ?: "" }.toTypedArray())
      }
-+    val focusManager = LocalFocusManager.current
-+    var focusedIndex by remember { mutableStateOf(-1) }
-+    var valuesOnFocus by remember { mutableStateOf(stored) }
++    var selectedIndex by remember { mutableStateOf(-1) }
++    var valuesOnSelect by remember { mutableStateOf(stored) }
++    // True until the first key press after picking a box: that press replaces the old number.
++    var fresh by remember { mutableStateOf(false) }
 +
 +    // Fills in the other boundaries from the box at [index], once editing it is finished.
 +    fun commit(index: Int) {
-+        if (focusedIndex != index) return
-+        focusedIndex = -1
-+        val filled = fillZoneBoundaries(valuesOnFocus, values.map { it.toIntOrNull() }, index)
++        if (selectedIndex != index) return
++        selectedIndex = -1
++        val filled = fillZoneBoundaries(valuesOnSelect, values.map { it.toIntOrNull() }, index)
 +        filled.forEachIndexed { i, v -> values[i] = v?.toString() ?: "" }
 +        onChange(filled)
 +    }
++
++    fun select(index: Int) {
++        if (selectedIndex == index) return
++        if (selectedIndex >= 0) commit(selectedIndex)
++        selectedIndex = index
++        valuesOnSelect = values.map { it.toIntOrNull() }
++        fresh = true
++    }
++
++    fun typeDigit(digit: Char) {
++        val i = selectedIndex
++        if (i < 0) return
++        values[i] = (if (fresh) "" else values[i]).plus(digit).take(3)
++        fresh = false
++        onChange(values.map { it.toIntOrNull() })
++    }
++
++    fun backspace() {
++        val i = selectedIndex
++        if (i < 0) return
++        values[i] = if (fresh) "" else values[i].dropLast(1)
++        fresh = false
++        onChange(values.map { it.toIntOrNull() })
++    }
++
 +    // The dialog's own Done button can close this screen while a box is still being edited.
 +    val latestCommit by rememberUpdatedState({ i: Int -> commit(i) })
 +    val latestOnEditing by rememberUpdatedState(onEditing)
 +    DisposableEffect(Unit) {
 +        onDispose {
-+            if (focusedIndex >= 0) latestCommit(focusedIndex)
++            if (selectedIndex >= 0) latestCommit(selectedIndex)
 +            latestOnEditing(null)
 +        }
 +    }
 +
-+    // The on-screen keyboard can cover the boxes, so report which zone boundary is being edited;
-+    // the dialog shows it in a banner at its top.
-+    val editing = if (focusedIndex in values.indices) {
-+        "Editing zone ${focusedIndex + 1} to ${focusedIndex + 2}:  ${values[focusedIndex].ifEmpty { "_" }}"
++    // Also reported to the dialog, which shows it in a banner pinned at its top.
++    val editing = if (selectedIndex in values.indices) {
++        "Editing zone ${selectedIndex + 1} to ${selectedIndex + 2}:  ${values[selectedIndex].ifEmpty { "_" }}"
 +    } else null
 +    LaunchedEffect(editing) { latestOnEditing(editing) }
++
 +    val entered = values.map { it.toIntOrNull() }
 +    if (entered.all { it != null } && entered.zipWithNext().any { (a, b) -> a!! >= b!! }) {
 +        Text(
@@ -172,28 +234,53 @@ index c2f33a6..4a5f0fe 100644
      BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
          val columns = if (maxWidth >= 480.dp) 4 else 2
          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-@@ -29,8 +75,22 @@ internal fun HeartRateZoneSettings(stored: List<Int?>, onChange: (List<Int?>) ->
-                             onChange(values.map { it.toIntOrNull() })
-                         // Use words: the bundled font does not contain the right-arrow glyph.
-                         }, label = { Text("${index + 1} to ${index + 2}") }, singleLine = true,
+             values.indices.toList().chunked(columns).forEach { indices ->
+                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                     indices.forEach { index ->
+-                        OutlinedTextField(values[index], { input ->
+-                            values[index] = input.filter(Char::isDigit).take(3)
+-                            onChange(values.map { it.toIntOrNull() })
+-                        // Use words: the bundled font does not contain the right-arrow glyph.
+-                        }, label = { Text("${index + 1} to ${index + 2}") }, singleLine = true,
 -                            modifier = Modifier.weight(1f),
 -                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-+                            modifier = Modifier.weight(1f).onFocusChanged { state ->
-+                                if (state.isFocused) {
-+                                    focusedIndex = index
-+                                    valuesOnFocus = values.map { it.toIntOrNull() }
-+                                } else {
-+                                    commit(index)
-+                                }
-+                            },
-+                            keyboardOptions = KeyboardOptions(
-+                                keyboardType = KeyboardType.NumberPassword,
-+                                imeAction = ImeAction.Done,
-+                            ),
-+                            keyboardActions = KeyboardActions(onDone = {
-+                                commit(index)
-+                                focusManager.clearFocus()
-+                            }))
++                        val selected = index == selectedIndex
++                        Column(
++                            Modifier.weight(1f)
++                                .border(if (selected) 3.dp else 1.dp, if (selected) SelectedBorder else IdleBorder, RoundedCornerShape(8.dp))
++                                .clickable { select(index) }
++                                .padding(horizontal = 12.dp, vertical = 8.dp),
++                        ) {
++                            // Use words: the bundled font does not contain the right-arrow glyph.
++                            Text("${index + 1} to ${index + 2}", fontSize = 13.sp, color = if (selected) SelectedBorder else Color.Unspecified)
++                            Text(values[index].ifEmpty { "-" }, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
++                        }
++                    }
++                }
++            }
++        }
++    }
++    if (selectedIndex >= 0) {
++        val rows = listOf(
++            listOf("1", "2", "3", "4", "5", "Del"),
++            listOf("6", "7", "8", "9", "0", "Done"),
++        )
++        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
++            rows.forEach { row ->
++                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++                    row.forEach { key ->
++                        Box(
++                            Modifier.weight(1f).height(48.dp)
++                                .border(1.dp, IdleBorder, RoundedCornerShape(8.dp))
++                                .clickable {
++                                    when (key) {
++                                        "Del" -> backspace()
++                                        "Done" -> commit(selectedIndex)
++                                        else -> typeDigit(key[0])
++                                    }
++                                },
++                            contentAlignment = Alignment.Center,
++                        ) { Text(key, fontSize = 20.sp, fontWeight = FontWeight.SemiBold) }
                      }
                  }
              }
