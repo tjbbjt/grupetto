@@ -41,52 +41,92 @@ index 0000000..348852a
 +    }
 +}
 diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-index c2f33a6..5d8d29e 100644
+index c2f33a6..0cacc4a 100644
 --- a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
 +++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-@@ -6,6 +6,7 @@ import androidx.compose.material.OutlinedTextField
+@@ -1,12 +1,17 @@
+ package com.spop.poverlay
+ 
+ import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.text.KeyboardActions
+ import androidx.compose.foundation.text.KeyboardOptions
+ import androidx.compose.material.OutlinedTextField
  import androidx.compose.material.Text
  import androidx.compose.runtime.*
  import androidx.compose.ui.Modifier
 +import androidx.compose.ui.focus.onFocusChanged
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.platform.LocalFocusManager
  import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.input.ImeAction
  import androidx.compose.ui.text.input.KeyboardType
  import androidx.compose.ui.unit.dp
-@@ -14,10 +15,12 @@ import androidx.compose.ui.unit.sp
+ import androidx.compose.ui.unit.sp
+@@ -14,10 +19,38 @@ import androidx.compose.ui.unit.sp
  @Composable
  internal fun HeartRateZoneSettings(stored: List<Int?>, onChange: (List<Int?>) -> Unit) {
      Text("Zone boundaries (bpm)", fontWeight = FontWeight.SemiBold)
 -    Text("Leave a boundary blank to use the default.", fontSize = 13.sp)
-+    Text("Enter any one boundary and tap away: the others are worked out at 60/70/80/90% of max heart rate. Boxes you typed yourself are kept.", fontSize = 13.sp)
++    Text("Enter any one boundary and tap Done: the others are worked out at 60/70/80/90% of max heart rate. Boxes you typed yourself are kept.", fontSize = 13.sp)
      val values = remember(stored) {
          mutableStateListOf(*stored.map { it?.toString() ?: "" }.toTypedArray())
      }
++    val focusManager = LocalFocusManager.current
 +    var focusedIndex by remember { mutableStateOf(-1) }
 +    var valuesOnFocus by remember { mutableStateOf(stored) }
++
++    // Fills in the other boundaries from the box at [index], once editing it is finished.
++    fun commit(index: Int) {
++        if (focusedIndex != index) return
++        focusedIndex = -1
++        val filled = fillZoneBoundaries(valuesOnFocus, values.map { it.toIntOrNull() }, index)
++        filled.forEachIndexed { i, v -> values[i] = v?.toString() ?: "" }
++        onChange(filled)
++    }
++    // The dialog's own Done button can close this screen while a box is still being edited.
++    val latestCommit by rememberUpdatedState({ i: Int -> commit(i) })
++    DisposableEffect(Unit) {
++        onDispose { if (focusedIndex >= 0) latestCommit(focusedIndex) }
++    }
++
++    // The on-screen keyboard can cover the box being edited, so show its text here as well.
++    if (focusedIndex in values.indices) {
++        Text(
++            "Editing ${focusedIndex + 1} to ${focusedIndex + 2}: ${values[focusedIndex].ifEmpty { "blank" }}",
++            modifier = Modifier.padding(top = 8.dp),
++            color = Color(0xFF7DD3FC),
++            fontWeight = FontWeight.SemiBold,
++            fontSize = 18.sp,
++        )
++    }
      BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
          val columns = if (maxWidth >= 480.dp) 4 else 2
          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-@@ -29,7 +32,19 @@ internal fun HeartRateZoneSettings(stored: List<Int?>, onChange: (List<Int?>) ->
+@@ -29,8 +62,22 @@ internal fun HeartRateZoneSettings(stored: List<Int?>, onChange: (List<Int?>) ->
                              onChange(values.map { it.toIntOrNull() })
                          // Use words: the bundled font does not contain the right-arrow glyph.
                          }, label = { Text("${index + 1} to ${index + 2}") }, singleLine = true,
 -                            modifier = Modifier.weight(1f),
+-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
 +                            modifier = Modifier.weight(1f).onFocusChanged { state ->
 +                                if (state.isFocused) {
 +                                    focusedIndex = index
 +                                    valuesOnFocus = values.map { it.toIntOrNull() }
-+                                } else if (focusedIndex == index) {
-+                                    focusedIndex = -1
-+                                    val filled = fillZoneBoundaries(
-+                                        valuesOnFocus, values.map { it.toIntOrNull() }, index
-+                                    )
-+                                    filled.forEachIndexed { i, v -> values[i] = v?.toString() ?: "" }
-+                                    onChange(filled)
++                                } else {
++                                    commit(index)
 +                                }
 +                            },
-                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
++                            keyboardOptions = KeyboardOptions(
++                                keyboardType = KeyboardType.Number,
++                                imeAction = ImeAction.Done,
++                            ),
++                            keyboardActions = KeyboardActions(onDone = {
++                                commit(index)
++                                focusManager.clearFocus()
++                            }))
                      }
                  }
+             }
 diff --git a/app/src/main/java/com/spop/poverlay/overlay/OverlayService.kt b/app/src/main/java/com/spop/poverlay/overlay/OverlayService.kt
 index 1e27e03..8bc435a 100644
 --- a/app/src/main/java/com/spop/poverlay/overlay/OverlayService.kt
@@ -108,68 +148,100 @@ index 1e27e03..8bc435a 100644
              screenSize,
              sensorViewModel.isMinimized,
 diff --git a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
-index 0b181bc..c7e17fa 100644
+index 0b181bc..c29d838 100644
 --- a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
 +++ b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
-@@ -42,6 +42,8 @@ object HeartRateManager {
+@@ -41,7 +41,10 @@ object HeartRateManager {
+     private const val PrefMatchByName = "hr_match_by_name"
  
      private const val ReconnectDelayMs = 3_000L
-     private const val AutoReconnectScanMs = 10_000L
-+    // After the bike first moves, scan flat out for a saved strap for this long.
-+    private const val MovementScanWindowMs = 30_000L
+-    private const val AutoReconnectScanMs = 10_000L
++    // Each background scan runs this long at full speed, then restarts after ReconnectDelayMs.
++    // Long enough to catch a strap that advertises slowly, short enough that Android never
++    // demotes it to an opportunistic scan.
++    private const val AutoReconnectScanMs = 30_000L
      private const val StaleHeartRateTimeoutMs = 12_000L
      // Android abandons a direct connectGatt after about 30 s; do not restart a
      // pending attempt to the same strap sooner. Straps already serving other
-@@ -123,6 +125,9 @@ object HeartRateManager {
-     @Volatile
-     private var manualDisconnectRequested = false
+@@ -233,10 +236,9 @@ object HeartRateManager {
+         }
+     }
  
-+    @Volatile
-+    private var movementScanUntilMs = 0L
-+
-     @Volatile
-     private var lastHeartRateAtMs: Long = 0L
- 
-@@ -300,6 +305,21 @@ object HeartRateManager {
+-    // scanMode defaults to LOW_LATENCY for the user-initiated "scan for devices" flow, which
+-    // wants fast results. The unattended background auto-reconnect loop passes LOW_POWER
+-    // instead, since it can run continuously (whenever no strap is connected) and fast
+-    // discovery there isn't worth the extra battery/CPU draw.
++    // Always scan at LOW_LATENCY. The background auto-reconnect used LOW_POWER (about a 10% duty
++    // cycle), which on the bike's tablet often missed a saved strap until settings opened the fast
++    // scan. The bike is mains powered, so the extra power draw does not matter.
+     @Synchronized
+     fun startDiscovery(scanMode: Int = ScanSettings.SCAN_MODE_LOW_LATENCY) {
+         if (!shouldScan()) { stopDiscovery(); updateIdleStatus(); return }
+@@ -300,13 +302,30 @@ object HeartRateManager {
          if (callback != null) bluetoothAccess?.stopScan(callback)
      }
  
 +    /**
-+     * Called when the bike starts moving. If a saved strap is not connected, scan continuously at
-+     * full speed for [MovementScanWindowMs] so it is picked up without opening settings.
-+     * Does nothing after a manual disconnect, with no saved strap, or while a strap is connected.
++     * Called when the bike starts moving. If no strap is connected, drop any stalled connection
++     * attempt and start a fresh full-speed scan right now, so a saved strap is picked up without
++     * opening settings. Does nothing after a manual disconnect, with no saved strap, or while a
++     * strap is connected.
 +     */
 +    @Synchronized
 +    fun scanForSavedStrapAfterMovement() {
-+        if (stopped.get() || manualDisconnectRequested || bluetoothGatt != null) return
++        if (stopped.get() || manualDisconnectRequested || _connectedDevice.value != null) return
 +        if (_savedDevices.value.isEmpty()) return
-+        movementScanUntilMs = monotonicTimeMs() + MovementScanWindowMs
-+        // Restart so a slow background scan is replaced by a fast one right away.
++        // A pending direct connection to a strap that is not there would block scanning.
++        if (bluetoothGatt != null) releaseCurrentGatt()
 +        stopDiscovery()
++        nextScanAtMs = 0L
 +        startDiscovery(ScanSettings.SCAN_MODE_LOW_LATENCY)
 +    }
 +
      /** The matching pairing picker is visible, not merely the settings screen. */
      @Synchronized
      fun setManaging(active: Boolean) {
-@@ -606,11 +626,15 @@ object HeartRateManager {
-             }
-         }
-         if (!shouldScan()) { stopDiscovery(); updateIdleStatus(); return }
--        if (_isScanning.value && now - scanStartedAtMs >= AutoReconnectScanMs) {
-+        val movementScan = now < movementScanUntilMs
-+        if (_isScanning.value && !movementScan && now - scanStartedAtMs >= AutoReconnectScanMs) {
+         if (isManaging == active) return
+         isManaging = active
+         stopDiscovery()
+-        if (shouldScan()) startDiscovery(if (active) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_LOW_POWER)
++        if (shouldScan()) startDiscovery(ScanSettings.SCAN_MODE_LOW_LATENCY)
+         else updateIdleStatus()
+     }
+ 
+@@ -610,7 +629,7 @@ object HeartRateManager {
              stopDiscovery()
              nextScanAtMs = now + ReconnectDelayMs
          } else if (!_isScanning.value && now >= nextScanAtMs) {
 -            startDiscovery(if (isManaging) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_LOW_POWER)
-+            startDiscovery(
-+                if (isManaging || movementScan) ScanSettings.SCAN_MODE_LOW_LATENCY
-+                else ScanSettings.SCAN_MODE_LOW_POWER
-+            )
++            startDiscovery(ScanSettings.SCAN_MODE_LOW_LATENCY)
          }
      }
  }
+diff --git a/app/src/main/java/com/spop/poverlay/sensor/power/PowerMeterManager.kt b/app/src/main/java/com/spop/poverlay/sensor/power/PowerMeterManager.kt
+index 9a4f9ab..bba1ee3 100644
+--- a/app/src/main/java/com/spop/poverlay/sensor/power/PowerMeterManager.kt
++++ b/app/src/main/java/com/spop/poverlay/sensor/power/PowerMeterManager.kt
+@@ -112,8 +112,8 @@ class PowerMeterManager internal constructor(
+             beginConnection(HeartRateDevice(it, preferences.getString("name_$it", null)))
+         }
+         // Bound scan sessions; allow Android's scan throttling to settle between retries.
+-        if (scan != null && now - scanStartedAt > 15000) {
+-            stopScan(); nextReconnectAt = now + 5000
++        if (scan != null && now - scanStartedAt > 30000) {
++            stopScan(); nextReconnectAt = now + 3000
+             preferReconnectScan = false
+         } else if (shouldScan() && scan == null && now >= nextReconnectAt) startScan()
+         if (!shouldScan()) stopScan()
+@@ -155,7 +155,7 @@ class PowerMeterManager internal constructor(
+         mutableScanning.value = true
+         scanStartedAt = clock()
+         if (!access.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(Service)).build()),
+-                ScanSettings.Builder().setScanMode(if (managing) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_LOW_POWER).build(), callback)) {
++                ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), callback)) {
+             scan = null; mutableScanning.value = false
+             mutableStatus.value = "Bluetooth scan unavailable"
+             nextReconnectAt = clock() + 5000
 diff --git a/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt b/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt
 new file mode 100644
 index 0000000..e109e4f

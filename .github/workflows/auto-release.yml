@@ -1,8 +1,9 @@
-name: Test build (APK download only, no release)
+name: Auto-release patched build
 
-# Builds the newest upstream Grupetto release with every patch in patches/ applied and keeps the
-# APK as a short-lived download on the run page. Nothing is published as a release.
-# Started by hand only. The workflow file must be on the fork's DEFAULT branch to be runnable.
+# Builds the newest upstream Grupetto release with every patch in patches/ applied and publishes
+# the APK as a release on this fork (delete the release after downloading it).
+# Started by hand: Actions > this workflow > Run workflow. The workflow file must be on the
+# fork's DEFAULT branch to be runnable.
 
 on:
   workflow_dispatch:
@@ -13,7 +14,7 @@ on:
         default: ''
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   UPSTREAM: doudar/grupetto
@@ -40,7 +41,7 @@ jobs:
             echo "::error::Upstream has no tag named '$TAG'. Tags look like v0.0.56. Leave the input blank to build the latest release."
             exit 1
           fi
-          OURS="${TAG}-blefix"
+          OURS="${TAG}-fork${GITHUB_RUN_NUMBER}"
           echo "upstream=$TAG" >> "$GITHUB_OUTPUT"
           echo "ours=$OURS" >> "$GITHUB_OUTPUT"
 
@@ -132,10 +133,14 @@ jobs:
           ./gradlew assembleRelease
           cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/grupetto-${{ steps.up.outputs.ours }}.apk"
 
-      - name: Keep the APK as a temporary download
+      - name: Publish release
         if: steps.patch.outputs.already != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: grupetto-${{ steps.up.outputs.ours }}
-          path: grupetto-${{ steps.up.outputs.ours }}.apk
-          retention-days: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.up.outputs.ours }}" \
+            "grupetto-${{ steps.up.outputs.ours }}.apk" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Grupetto ${{ steps.up.outputs.upstream }} + fork patches (build ${{ github.run_number }})" \
+            --notes "Upstream ${{ steps.up.outputs.upstream }} plus the patches in patches/: heart-rate strap reconnect scanning and heart-rate zone auto-fill. Built automatically."
