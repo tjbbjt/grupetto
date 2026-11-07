@@ -1,12 +1,10 @@
-name: Auto-release patched build
+name: Test build (APK download only, no release)
 
-# Builds the newest upstream Grupetto release with patches/ble-wheel-time-fix.patch applied
-# and publishes it as a release on this fork. Runs daily and can be started by hand.
-# NOTE: scheduled workflows only run from the fork's DEFAULT branch.
+# Builds the newest upstream Grupetto release with every patch in patches/ applied and keeps the
+# APK as a short-lived download on the run page. Nothing is published as a release.
+# Started by hand only. The workflow file must be on the fork's DEFAULT branch to be runnable.
 
 on:
-  schedule:
-    - cron: '17 9 * * *'
   workflow_dispatch:
     inputs:
       upstream_tag:
@@ -15,7 +13,7 @@ on:
         default: ''
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   UPSTREAM: doudar/grupetto
@@ -38,22 +36,20 @@ jobs:
             echo "::error::Could not determine the latest upstream release"
             exit 1
           fi
+          if ! gh api "repos/$UPSTREAM/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Upstream has no tag named '$TAG'. Tags look like v0.0.56. Leave the input blank to build the latest release."
+            exit 1
+          fi
           OURS="${TAG}-blefix"
           echo "upstream=$TAG" >> "$GITHUB_OUTPUT"
           echo "ours=$OURS" >> "$GITHUB_OUTPUT"
-          if gh release view "$OURS" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::notice::$OURS already exists, nothing to do"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Check out this fork (for the patch)
-        if: steps.up.outputs.skip != 'true'
         uses: actions/checkout@v5
         with:
           path: fork
 
       - name: Check out upstream at that release
-        if: steps.up.outputs.skip != 'true'
         uses: actions/checkout@v5
         with:
           repository: ${{ env.UPSTREAM }}
@@ -62,7 +58,6 @@ jobs:
 
       - name: Apply the patches (skipping any upstream already contains)
         id: patch
-        if: steps.up.outputs.skip != 'true'
         working-directory: src
         run: |
           applied=0
@@ -83,14 +78,14 @@ jobs:
           fi
 
       - uses: actions/setup-java@v5
-        if: steps.up.outputs.skip != 'true' && steps.patch.outputs.already != 'true'
+        if: steps.patch.outputs.already != 'true'
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: gradle
 
       - name: Set up signing
-        if: steps.up.outputs.skip != 'true' && steps.patch.outputs.already != 'true'
+        if: steps.patch.outputs.already != 'true'
         working-directory: src
         env:
           KS_B64: ${{ secrets.FORK_KEYSTORE_B64 }}
@@ -115,7 +110,7 @@ jobs:
           fi
 
       - name: Set version
-        if: steps.up.outputs.skip != 'true' && steps.patch.outputs.already != 'true'
+        if: steps.patch.outputs.already != 'true'
         working-directory: src
         run: |
           # versionCode must keep rising for in-place updates; use a UTC timestamp (yymmddHH).
@@ -124,27 +119,23 @@ jobs:
           grep -E "versionCode|versionName" app/build.gradle
 
       - name: Test the patched code
-        if: steps.up.outputs.skip != 'true' && steps.patch.outputs.already != 'true'
+        if: steps.patch.outputs.already != 'true'
         working-directory: src
         run: |
           chmod +x gradlew
           ./gradlew testDebugUnitTest --tests '*CyclingPowerWheelTimeTest' --tests '*HeartRateZoneMathTest' --continue
 
       - name: Build release APK
-        if: steps.up.outputs.skip != 'true' && steps.patch.outputs.already != 'true'
+        if: steps.patch.outputs.already != 'true'
         working-directory: src
         run: |
           ./gradlew assembleRelease
           cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/grupetto-${{ steps.up.outputs.ours }}.apk"
 
-      - name: Publish release
-        if: steps.up.outputs.skip != 'true' && steps.patch.outputs.already != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${{ steps.up.outputs.ours }}" \
-            "grupetto-${{ steps.up.outputs.ours }}.apk" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "Grupetto ${{ steps.up.outputs.upstream }} + fork patches" \
-            --notes "Upstream ${{ steps.up.outputs.upstream }} plus the patches in patches/: BLE wheel-time fix, heart-rate strap scan after movement, heart-rate zone auto-fill. Built automatically."
+      - name: Keep the APK as a temporary download
+        if: steps.patch.outputs.already != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: grupetto-${{ steps.up.outputs.ours }}
+          path: grupetto-${{ steps.up.outputs.ours }}.apk
+          retention-days: 3
