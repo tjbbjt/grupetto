@@ -1,0 +1,225 @@
+diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt
+new file mode 100644
+index 0000000..348852a
+--- /dev/null
++++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt
+@@ -0,0 +1,36 @@
++package com.spop.poverlay
++
++import kotlin.math.abs
++import kotlin.math.roundToInt
++
++/** Zone boundaries as a percentage of maximum heart rate: 1-2, 2-3, 3-4, 4-5. */
++private val ZoneBoundaryPercents = listOf(60, 70, 80, 90)
++
++private fun boundariesFrom(anchor: Int, anchorIndex: Int): List<Int> {
++    val maxHeartRate = anchor * 100.0 / ZoneBoundaryPercents[anchorIndex]
++    return ZoneBoundaryPercents.map { (maxHeartRate * it / 100.0).roundToInt() }
++}
++
++/**
++ * Called after the boundary at [anchorIndex] was edited, with all four boundaries [before] and
++ * [after] the edit. Other boundaries are calculated from it at 60/70/80/90% of max heart rate:
++ *  - blank boundaries are always filled in;
++ *  - boundaries that were still the automatic values for the old number (give or take 1 bpm)
++ *    follow the new number;
++ *  - boundaries someone typed in by hand are left alone.
++ */
++internal fun fillZoneBoundaries(before: List<Int?>, after: List<Int?>, anchorIndex: Int): List<Int?> {
++    if (before.size != ZoneBoundaryPercents.size || after.size != before.size) return after
++    val anchor = after.getOrNull(anchorIndex)?.takeIf { it > 0 } ?: return after
++    val oldAnchor = before[anchorIndex]?.takeIf { it > 0 }
++    val oldAuto = oldAnchor?.let { boundariesFrom(it, anchorIndex) }
++    val newAuto = boundariesFrom(anchor, anchorIndex)
++    return after.mapIndexed { index, value ->
++        when {
++            index == anchorIndex -> value
++            value == null -> newAuto[index]
++            oldAuto != null && abs(value - oldAuto[index]) <= 1 -> newAuto[index]
++            else -> value
++        }
++    }
++}
+diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
+index c2f33a6..5d8d29e 100644
+--- a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
++++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
+@@ -6,6 +6,7 @@ import androidx.compose.material.OutlinedTextField
+ import androidx.compose.material.Text
+ import androidx.compose.runtime.*
+ import androidx.compose.ui.Modifier
++import androidx.compose.ui.focus.onFocusChanged
+ import androidx.compose.ui.text.font.FontWeight
+ import androidx.compose.ui.text.input.KeyboardType
+ import androidx.compose.ui.unit.dp
+@@ -14,10 +15,12 @@ import androidx.compose.ui.unit.sp
+ @Composable
+ internal fun HeartRateZoneSettings(stored: List<Int?>, onChange: (List<Int?>) -> Unit) {
+     Text("Zone boundaries (bpm)", fontWeight = FontWeight.SemiBold)
+-    Text("Leave a boundary blank to use the default.", fontSize = 13.sp)
++    Text("Enter any one boundary and tap away: the others are worked out at 60/70/80/90% of max heart rate. Boxes you typed yourself are kept.", fontSize = 13.sp)
+     val values = remember(stored) {
+         mutableStateListOf(*stored.map { it?.toString() ?: "" }.toTypedArray())
+     }
++    var focusedIndex by remember { mutableStateOf(-1) }
++    var valuesOnFocus by remember { mutableStateOf(stored) }
+     BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+         val columns = if (maxWidth >= 480.dp) 4 else 2
+         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+@@ -29,7 +32,19 @@ internal fun HeartRateZoneSettings(stored: List<Int?>, onChange: (List<Int?>) ->
+                             onChange(values.map { it.toIntOrNull() })
+                         // Use words: the bundled font does not contain the right-arrow glyph.
+                         }, label = { Text("${index + 1} to ${index + 2}") }, singleLine = true,
+-                            modifier = Modifier.weight(1f),
++                            modifier = Modifier.weight(1f).onFocusChanged { state ->
++                                if (state.isFocused) {
++                                    focusedIndex = index
++                                    valuesOnFocus = values.map { it.toIntOrNull() }
++                                } else if (focusedIndex == index) {
++                                    focusedIndex = -1
++                                    val filled = fillZoneBoundaries(
++                                        valuesOnFocus, values.map { it.toIntOrNull() }, index
++                                    )
++                                    filled.forEachIndexed { i, v -> values[i] = v?.toString() ?: "" }
++                                    onChange(filled)
++                                }
++                            },
+                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                     }
+                 }
+diff --git a/app/src/main/java/com/spop/poverlay/overlay/OverlayService.kt b/app/src/main/java/com/spop/poverlay/overlay/OverlayService.kt
+index 1e27e03..8bc435a 100644
+--- a/app/src/main/java/com/spop/poverlay/overlay/OverlayService.kt
++++ b/app/src/main/java/com/spop/poverlay/overlay/OverlayService.kt
+@@ -192,6 +192,15 @@ class OverlayService : LifecycleEnabledService() {
+         // Wire up timer to auto-start/pause based on movement
+         timerViewModel.observeMovement(sensorViewModel.isMoving, sensorViewModel.sessionReset)
+ 
++        // When the bike starts moving, look hard for a saved heart-rate strap that is not connected.
++        lifecycleScope.launch {
++            var wasMoving = false
++            sensorViewModel.isMoving.collect { moving ->
++                if (moving && !wasMoving) HeartRateManager.scanForSavedStrapAfterMovement()
++                wasMoving = moving
++            }
++        }
++
+         val dialogViewModel = OverlayDialogViewModel(
+             screenSize,
+             sensorViewModel.isMinimized,
+diff --git a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
+index 0b181bc..c7e17fa 100644
+--- a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
++++ b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
+@@ -42,6 +42,8 @@ object HeartRateManager {
+ 
+     private const val ReconnectDelayMs = 3_000L
+     private const val AutoReconnectScanMs = 10_000L
++    // After the bike first moves, scan flat out for a saved strap for this long.
++    private const val MovementScanWindowMs = 30_000L
+     private const val StaleHeartRateTimeoutMs = 12_000L
+     // Android abandons a direct connectGatt after about 30 s; do not restart a
+     // pending attempt to the same strap sooner. Straps already serving other
+@@ -123,6 +125,9 @@ object HeartRateManager {
+     @Volatile
+     private var manualDisconnectRequested = false
+ 
++    @Volatile
++    private var movementScanUntilMs = 0L
++
+     @Volatile
+     private var lastHeartRateAtMs: Long = 0L
+ 
+@@ -300,6 +305,21 @@ object HeartRateManager {
+         if (callback != null) bluetoothAccess?.stopScan(callback)
+     }
+ 
++    /**
++     * Called when the bike starts moving. If a saved strap is not connected, scan continuously at
++     * full speed for [MovementScanWindowMs] so it is picked up without opening settings.
++     * Does nothing after a manual disconnect, with no saved strap, or while a strap is connected.
++     */
++    @Synchronized
++    fun scanForSavedStrapAfterMovement() {
++        if (stopped.get() || manualDisconnectRequested || bluetoothGatt != null) return
++        if (_savedDevices.value.isEmpty()) return
++        movementScanUntilMs = monotonicTimeMs() + MovementScanWindowMs
++        // Restart so a slow background scan is replaced by a fast one right away.
++        stopDiscovery()
++        startDiscovery(ScanSettings.SCAN_MODE_LOW_LATENCY)
++    }
++
+     /** The matching pairing picker is visible, not merely the settings screen. */
+     @Synchronized
+     fun setManaging(active: Boolean) {
+@@ -606,11 +626,15 @@ object HeartRateManager {
+             }
+         }
+         if (!shouldScan()) { stopDiscovery(); updateIdleStatus(); return }
+-        if (_isScanning.value && now - scanStartedAtMs >= AutoReconnectScanMs) {
++        val movementScan = now < movementScanUntilMs
++        if (_isScanning.value && !movementScan && now - scanStartedAtMs >= AutoReconnectScanMs) {
+             stopDiscovery()
+             nextScanAtMs = now + ReconnectDelayMs
+         } else if (!_isScanning.value && now >= nextScanAtMs) {
+-            startDiscovery(if (isManaging) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_LOW_POWER)
++            startDiscovery(
++                if (isManaging || movementScan) ScanSettings.SCAN_MODE_LOW_LATENCY
++                else ScanSettings.SCAN_MODE_LOW_POWER
++            )
+         }
+     }
+ }
+diff --git a/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt b/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt
+new file mode 100644
+index 0000000..e109e4f
+--- /dev/null
++++ b/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt
+@@ -0,0 +1,47 @@
++package com.spop.poverlay
++
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++class HeartRateZoneMathTest {
++    private val none = listOf<Int?>(null, null, null, null)
++    private val defaults = listOf<Int?>(108, 126, 144, 162)
++
++    @Test
++    fun `one boundary fills the blank rest at 60 70 80 90 percent of max`() {
++        assertEquals(defaults, fillZoneBoundaries(none, listOf(null, 126, null, null), 1))
++        assertEquals(defaults, fillZoneBoundaries(none, listOf(108, null, null, null), 0))
++        assertEquals(defaults, fillZoneBoundaries(none, listOf(null, null, null, 162), 3))
++    }
++
++    @Test
++    fun `changing one of an automatic set moves the whole set`() {
++        // Max 190: 114, 133, 152, 171
++        assertEquals(
++            listOf<Int?>(114, 133, 152, 171),
++            fillZoneBoundaries(defaults, listOf(108, 133, 144, 162), 1)
++        )
++    }
++
++    @Test
++    fun `boundaries typed by hand are left alone`() {
++        // 100 is not the automatic value for 126, so it stays; the automatic ones follow.
++        assertEquals(
++            listOf<Int?>(100, 133, 152, 171),
++            fillZoneBoundaries(listOf(100, 126, 144, 162), listOf(100, 133, 144, 162), 1)
++        )
++    }
++
++    @Test
++    fun `blank or zero anchor changes nothing`() {
++        assertEquals(none, fillZoneBoundaries(none, none, 2))
++        val zero = listOf<Int?>(0, null, null, null)
++        assertEquals(zero, fillZoneBoundaries(none, zero, 0))
++    }
++
++    @Test
++    fun `wrong sized lists are returned unchanged`() {
++        val short = listOf<Int?>(126)
++        assertEquals(short, fillZoneBoundaries(short, short, 0))
++    }
++}
