@@ -92,12 +92,13 @@ index 1973b24..514b1b5 100644
              val devices = discoveredDevices.filter { candidate ->
 diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt
 new file mode 100644
-index 0000000..1d13a2a
+index 0000000..a59e48c
 --- /dev/null
 +++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,39 @@
 +package com.spop.poverlay
 +
++import kotlin.math.abs
 +import kotlin.math.roundToInt
 +
 +/** Where zones 1 to 5 start, as a percentage of maximum heart rate. */
@@ -110,17 +111,28 @@ index 0000000..1d13a2a
 +
 +/**
 + * Called after the boundary at [anchorIndex] was edited, with all five boundaries [before] and
-+ * [after] the edit. If that boundary did not change, nothing happens. Otherwise every other
-+ * boundary is recalculated from it at 50/60/70/80/90% of max heart rate, so the five always stay
-+ * in increasing order.
++ * [after] the edit. If that boundary did not change, nothing happens. Otherwise the others are
++ * calculated from it at 50/60/70/80/90% of max heart rate:
++ *  - blank boundaries are always filled in;
++ *  - boundaries that were still the automatic values for the old number (give or take 1 bpm)
++ *    follow the new number;
++ *  - boundaries someone typed in by hand are left alone.
 + */
 +internal fun fillZoneBoundaries(before: List<Int?>, after: List<Int?>, anchorIndex: Int): List<Int?> {
 +    if (before.size != ZoneBoundaryPercents.size || after.size != before.size) return after
 +    // Merely tapping into a box must not recalculate anything.
 +    if (before.getOrNull(anchorIndex) == after.getOrNull(anchorIndex)) return after
 +    val anchor = after.getOrNull(anchorIndex)?.takeIf { it > 0 } ?: return after
-+    return boundariesFrom(anchor, anchorIndex).mapIndexed { index, value ->
-+        if (index == anchorIndex) anchor else value
++    val oldAnchor = before[anchorIndex]?.takeIf { it > 0 }
++    val oldAuto = oldAnchor?.let { boundariesFrom(it, anchorIndex) }
++    val newAuto = boundariesFrom(anchor, anchorIndex)
++    return after.mapIndexed { index, value ->
++        when {
++            index == anchorIndex -> value
++            value == null -> newAuto[index]
++            oldAuto != null && abs(value - oldAuto[index]) <= 1 -> newAuto[index]
++            else -> value
++        }
 +    }
 +}
 diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
@@ -899,10 +911,10 @@ index 9a4f9ab..7d74e42 100644
              nextReconnectAt = clock() + 5000
 diff --git a/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt b/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt
 new file mode 100644
-index 0000000..a779d40
+index 0000000..c020bfb
 --- /dev/null
 +++ b/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,55 @@
 +package com.spop.poverlay
 +
 +import org.junit.Assert.assertEquals
@@ -920,7 +932,7 @@ index 0000000..a779d40
 +    }
 +
 +    @Test
-+    fun `changing one box moves the whole set`() {
++    fun `changing one of an automatic set moves the whole set`() {
 +        // Max 190: 95, 114, 133, 152, 171
 +        assertEquals(
 +            listOf<Int?>(95, 114, 133, 152, 171),
@@ -929,9 +941,10 @@ index 0000000..a779d40
 +    }
 +
 +    @Test
-+    fun `editing one box recalculates all the others even custom ones`() {
++    fun `boundaries typed by hand are left alone`() {
++        // 85 is not the automatic value for 126, so it stays; the automatic ones follow.
 +        assertEquals(
-+            listOf<Int?>(95, 114, 133, 152, 171),
++            listOf<Int?>(85, 114, 133, 152, 171),
 +            fillZoneBoundaries(listOf(85, 108, 126, 144, 162), listOf(85, 108, 133, 144, 162), 2)
 +        )
 +    }
