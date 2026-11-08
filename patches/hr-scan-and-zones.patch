@@ -1,5 +1,5 @@
 diff --git a/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt b/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
-index 5c18376..e05c6cb 100644
+index 5c18376..bfe9abc 100644
 --- a/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
 +++ b/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
 @@ -17,37 +17,39 @@ import org.junit.Test
@@ -11,7 +11,7 @@ index 5c18376..e05c6cb 100644
          var updated: List<Int?>? = null
          compose.setContent { MaterialTheme(typography = Typography) { Column {
 -            HeartRateZoneSettings(listOf(108, 126, 144, 162)) { updated = it }
-+            HeartRateZoneSettings(listOf(90, 108, 126, 144, 162)) { updated = it }
++            HeartRateZoneSettings(listOf(108, 126, 144, 162, 180)) { updated = it }
          } } }
 -        listOf("1 to 2", "2 to 3", "3 to 4", "4 to 5").forEach {
 +        listOf("Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5").forEach {
@@ -24,9 +24,9 @@ index 5c18376..e05c6cb 100644
 +        // The keypad only appears once a box is picked; the first key replaces the old number.
 +        compose.onNodeWithText("Zone 1").performClick()
 +        listOf("1", "1", "5").forEach { compose.onNodeWithText(it).performClick() }
-+        compose.runOnIdle { assertEquals(listOf(115, 108, 126, 144, 162), updated) }
++        compose.runOnIdle { assertEquals(listOf(115, 126, 144, 162, 180), updated) }
 +        compose.onNodeWithText("Del").performClick()
-+        compose.runOnIdle { assertEquals(listOf(11, 108, 126, 144, 162), updated) }
++        compose.runOnIdle { assertEquals(listOf(11, 126, 144, 162, 180), updated) }
      }
  
 -    @Test fun boundariesWrapIntoTwoRowsOnNarrowDialogsAndStayInOneRowWhenWide() {
@@ -36,7 +36,7 @@ index 5c18376..e05c6cb 100644
          compose.setContent { MaterialTheme(typography = Typography) {
              Column(Modifier.requiredWidth(width.value)) {
 -                HeartRateZoneSettings(listOf(108, 126, 144, 162)) {}
-+                HeartRateZoneSettings(listOf(90, 108, 126, 144, 162)) {}
++                HeartRateZoneSettings(listOf(108, 126, 144, 162, 180)) {}
              }
          } }
          fun bounds(label: String) = compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot
@@ -61,17 +61,17 @@ index 5c18376..e05c6cb 100644
          }
      }
 diff --git a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
-index 1973b24..514b1b5 100644
+index 1973b24..6406a28 100644
 --- a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
 +++ b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
-@@ -524,6 +524,7 @@ private fun HeartRateManagerDialog(
-     var tab by remember { mutableStateOf(0) }
-     var page by remember { mutableStateOf(0) }
-     val bpm by HeartRateManager.heartRate.collectAsStateWithLifecycle()
-+    val zone01 by HeartRateManager.zone01.collectAsStateWithLifecycle()
-     val zone12 by HeartRateManager.zone12.collectAsStateWithLifecycle()
+@@ -528,6 +528,7 @@ private fun HeartRateManagerDialog(
      val zone23 by HeartRateManager.zone23.collectAsStateWithLifecycle()
      val zone34 by HeartRateManager.zone34.collectAsStateWithLifecycle()
+     val zone45 by HeartRateManager.zone45.collectAsStateWithLifecycle()
++    val zoneMax by HeartRateManager.zoneMax.collectAsStateWithLifecycle()
+     val connecting by HeartRateManager.connectingDevice.collectAsStateWithLifecycle()
+     SensorPickerScanEffect(tab == 0, HeartRateManager::setManaging)
+     SettingsDialog("Heart rate", onDismiss, scrollable = true) {
 @@ -545,8 +546,15 @@ private fun HeartRateManagerDialog(
          GrupettoTabs(tab, listOf("Discover", "Zones"), { tab = it; page = 0 })
          Spacer(Modifier.height(12.dp))
@@ -85,14 +85,14 @@ index 1973b24..514b1b5 100644
 +                fontWeight = FontWeight.SemiBold, color = Color(0xFF7DD3FC)
 +            )
 +            Spacer(Modifier.height(8.dp))
-+            HeartRateZoneSettings(listOf(zone01, zone12, zone23, zone34, zone45)) { values ->
++            HeartRateZoneSettings(listOf(zone12, zone23, zone34, zone45, zoneMax)) { values ->
 +                HeartRateManager.setHeartRateZones(values[0], values[1], values[2], values[3], values[4])
              }
          } else {
              val devices = discoveredDevices.filter { candidate ->
 diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt
 new file mode 100644
-index 0000000..a59e48c
+index 0000000..7857082
 --- /dev/null
 +++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt
 @@ -0,0 +1,39 @@
@@ -101,8 +101,8 @@ index 0000000..a59e48c
 +import kotlin.math.abs
 +import kotlin.math.roundToInt
 +
-+/** Where zones 1 to 5 start, as a percentage of maximum heart rate. */
-+private val ZoneBoundaryPercents = listOf(50, 60, 70, 80, 90)
++/** The top of zones 1 to 5, as a percentage of maximum heart rate (zone 5 ends at the maximum). */
++private val ZoneBoundaryPercents = listOf(60, 70, 80, 90, 100)
 +
 +private fun boundariesFrom(anchor: Int, anchorIndex: Int): List<Int> {
 +    val maxHeartRate = anchor * 100.0 / ZoneBoundaryPercents[anchorIndex]
@@ -112,7 +112,7 @@ index 0000000..a59e48c
 +/**
 + * Called after the boundary at [anchorIndex] was edited, with all five boundaries [before] and
 + * [after] the edit. If that boundary did not change, nothing happens. Otherwise the others are
-+ * calculated from it at 50/60/70/80/90% of max heart rate:
++ * calculated from it at 60/70/80/90/100% of max heart rate:
 + *  - blank boundaries are always filled in;
 + *  - boundaries that were still the automatic values for the old number (give or take 1 bpm)
 + *    follow the new number;
@@ -136,7 +136,7 @@ index 0000000..a59e48c
 +    }
 +}
 diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-index c2f33a6..b432475 100644
+index c2f33a6..73d8634 100644
 --- a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
 +++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
 @@ -1,36 +1,120 @@
@@ -244,7 +244,7 @@ index c2f33a6..b432475 100644
 +                                .clickable { select(index) }
 +                                .padding(horizontal = 12.dp, vertical = 8.dp),
 +                        ) {
-+                            // Each box is the heart rate where that zone starts: 50, 60, 70, 80 and 90% of max.
++                            // Each box is the top of that zone: 60, 70, 80, 90 and 100% of max heart rate.
 +                            Text("Zone ${index + 1}", fontSize = 13.sp, color = if (selected) SelectedBorder else Color.Unspecified)
 +                            Text(values[index].ifEmpty { "-" }, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
 +                        }
@@ -296,23 +296,27 @@ index 1e27e03..6609a65 100644
              screenSize,
              sensorViewModel.isMinimized,
 diff --git a/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt b/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt
-index d1f2300..7be1141 100644
+index d1f2300..98f03d5 100644
 --- a/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt
 +++ b/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt
-@@ -108,10 +108,11 @@ fun Overlay(
+@@ -108,14 +108,15 @@ fun Overlay(
          if (bpm != null && bpm > 0 && zones != null) heartRateZoneColor(bpm, zones)
          else MetricHeartRateColor
      }
 -    val heartRateZoneBands = remember(heartRateZones) {
-+    val zoneOneStart by HeartRateManager.zone01.collectAsStateWithLifecycle(initialValue = null)
-+    val heartRateZoneBands = remember(heartRateZones, zoneOneStart) {
++    val zoneMax by HeartRateManager.zoneMax.collectAsStateWithLifecycle(initialValue = null)
++    val heartRateZoneBands = remember(heartRateZones, zoneMax) {
          val zones = heartRateZones ?: return@remember null
          listOf(
--            ZoneBand(0f,          zones[0].toFloat(), HrZone1Color.copy(alpha = 0.3f).toArgb()),
-+            ZoneBand((zoneOneStart ?: 0).toFloat().coerceAtMost(zones[0].toFloat()), zones[0].toFloat(), HrZone1Color.copy(alpha = 0.3f).toArgb()),
+             ZoneBand(0f,          zones[0].toFloat(), HrZone1Color.copy(alpha = 0.3f).toArgb()),
              ZoneBand(zones[0].toFloat(), zones[1].toFloat(), HrZone2Color.copy(alpha = 0.3f).toArgb()),
              ZoneBand(zones[1].toFloat(), zones[2].toFloat(), HrZone3Color.copy(alpha = 0.3f).toArgb()),
              ZoneBand(zones[2].toFloat(), zones[3].toFloat(), HrZone4Color.copy(alpha = 0.3f).toArgb()),
+-            ZoneBand(zones[3].toFloat(), 220f,         HrZone5Color.copy(alpha = 0.3f).toArgb()),
++            ZoneBand(zones[3].toFloat(), (zoneMax ?: 220).toFloat().coerceAtLeast(zones[3] + 1f),         HrZone5Color.copy(alpha = 0.3f).toArgb()),
+         )
+     }
+     val timerLabel by timerViewModel.timerLabel.collectAsState(initial = "")
 diff --git a/app/src/main/java/com/spop/poverlay/sensor/ScanBudget.kt b/app/src/main/java/com/spop/poverlay/sensor/ScanBudget.kt
 new file mode 100644
 index 0000000..072f55a
@@ -381,7 +385,7 @@ index 3e59411..da6361b 100644
              Timber.w(e, "HR connection permission was revoked")
              null
 diff --git a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
-index 0b181bc..afbe1fa 100644
+index 0b181bc..ca7b314 100644
 --- a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
 +++ b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
 @@ -11,6 +11,7 @@ import android.bluetooth.le.ScanSettings
@@ -396,7 +400,7 @@ index 0b181bc..afbe1fa 100644
      private const val PrefSavedDevices = "hr_saved_devices"
      private const val PrefSelectedDevice = "hr_selected_device"
      private const val PrefNamePrefix = "hr_name_"
-+    private const val PrefZone01 = "hr_zone_01"
++    private const val PrefZoneMax = "hr_zone_max"
      private const val PrefZone12 = "hr_zone_12"
      private const val PrefZone23 = "hr_zone_23"
      private const val PrefZone34 = "hr_zone_34"
@@ -422,7 +426,7 @@ index 0b181bc..afbe1fa 100644
      private const val PendingConnectTimeoutMs = 30_000L
  
      // Default zones based on 180 bpm max HR (typical 40-year-old), 10% bands
-+    private const val DefaultZone01 = 90
++    private const val DefaultZoneMax = 180
      private const val DefaultZone12 = 108
      private const val DefaultZone23 = 126
      private const val DefaultZone34 = 144
@@ -430,9 +434,9 @@ index 0b181bc..afbe1fa 100644
      private val _isScanning = MutableStateFlow(false)
      val isScanning: StateFlow<Boolean> = _isScanning
  
-+    private val _zone01 = MutableStateFlow<Int?>(null)
-+    /** Where zone 1 starts; below it the heart rate is in no zone. */
-+    val zone01: StateFlow<Int?> = _zone01
++    private val _zoneMax = MutableStateFlow<Int?>(null)
++    /** The top of zone 5: the heart rate that counts as 100%. */
++    val zoneMax: StateFlow<Int?> = _zoneMax
      private val _zone12 = MutableStateFlow<Int?>(null)
      private val _zone23 = MutableStateFlow<Int?>(null)
      private val _zone34 = MutableStateFlow<Int?>(null)
@@ -528,7 +532,7 @@ index 0b181bc..afbe1fa 100644
 -        _zone34.value = readIntOrNull(PrefZone34) ?: DefaultZone34
 -        _zone45.value = readIntOrNull(PrefZone45) ?: DefaultZone45
 +        _zoneOwner.value = selectedAddress
-+        _zone01.value = readZone(PrefZone01, DefaultZone01)
++        _zoneMax.value = readZone(PrefZoneMax, DefaultZoneMax)
 +        _zone12.value = readZone(PrefZone12, DefaultZone12)
 +        _zone23.value = readZone(PrefZone23, DefaultZone23)
 +        _zone34.value = readZone(PrefZone34, DefaultZone34)
@@ -538,20 +542,20 @@ index 0b181bc..afbe1fa 100644
  
 -    fun setHeartRateZones(zone12: Int?, zone23: Int?, zone34: Int?, zone45: Int?) {
 +    /** Saves zones for the selected monitor, or as the shared default when none is selected. */
-+    fun setHeartRateZones(zone01: Int?, zone12: Int?, zone23: Int?, zone34: Int?, zone45: Int?) {
++    fun setHeartRateZones(zone12: Int?, zone23: Int?, zone34: Int?, zone45: Int?, zoneMax: Int?) {
 +        val owner = selectedAddress
          prefs?.edit {
 -            if (zone12 != null) putInt(PrefZone12, zone12) else remove(PrefZone12)
 -            if (zone23 != null) putInt(PrefZone23, zone23) else remove(PrefZone23)
 -            if (zone34 != null) putInt(PrefZone34, zone34) else remove(PrefZone34)
 -            if (zone45 != null) putInt(PrefZone45, zone45) else remove(PrefZone45)
-+            if (zone01 != null) putInt(zoneKey(PrefZone01, owner), zone01) else remove(zoneKey(PrefZone01, owner))
++            if (zoneMax != null) putInt(zoneKey(PrefZoneMax, owner), zoneMax) else remove(zoneKey(PrefZoneMax, owner))
 +            if (zone12 != null) putInt(zoneKey(PrefZone12, owner), zone12) else remove(zoneKey(PrefZone12, owner))
 +            if (zone23 != null) putInt(zoneKey(PrefZone23, owner), zone23) else remove(zoneKey(PrefZone23, owner))
 +            if (zone34 != null) putInt(zoneKey(PrefZone34, owner), zone34) else remove(zoneKey(PrefZone34, owner))
 +            if (zone45 != null) putInt(zoneKey(PrefZone45, owner), zone45) else remove(zoneKey(PrefZone45, owner))
          }
-+        _zone01.value = zone01
++        _zoneMax.value = zoneMax
          _zone12.value = zone12
          _zone23.value = zone23
          _zone34.value = zone34
@@ -562,7 +566,7 @@ index 0b181bc..afbe1fa 100644
 +    private fun copyZones(from: String, to: String) {
 +        val p = prefs ?: return
 +        p.edit {
-+            for (base in listOf(PrefZone01, PrefZone12, PrefZone23, PrefZone34, PrefZone45)) {
++            for (base in listOf(PrefZone12, PrefZone23, PrefZone34, PrefZone45, PrefZoneMax)) {
 +                val key = zoneKey(base, from)
 +                if (p.contains(key)) putInt(zoneKey(base, to), p.getInt(key, 0))
 +                remove(key)
@@ -679,7 +683,7 @@ index 0b181bc..afbe1fa 100644
          p.edit {
              putStringSet(PrefSavedDevices, saved)
              remove(PrefNamePrefix + address)
-+            for (base in listOf(PrefZone01, PrefZone12, PrefZone23, PrefZone34, PrefZone45)) remove(zoneKey(base, address))
++            for (base in listOf(PrefZone12, PrefZone23, PrefZone34, PrefZone45, PrefZoneMax)) remove(zoneKey(base, address))
              if (selectedAddress == address) remove(PrefSelectedDevice)
          }
          if (selectedAddress == address) {
@@ -911,10 +915,10 @@ index 9a4f9ab..7d74e42 100644
              nextReconnectAt = clock() + 5000
 diff --git a/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt b/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt
 new file mode 100644
-index 0000000..c020bfb
+index 0000000..3960f52
 --- /dev/null
 +++ b/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,64 @@
 +package com.spop.poverlay
 +
 +import org.junit.Assert.assertEquals
@@ -922,30 +926,39 @@ index 0000000..c020bfb
 +
 +class HeartRateZoneMathTest {
 +    private val none = listOf<Int?>(null, null, null, null, null)
-+    private val defaults = listOf<Int?>(90, 108, 126, 144, 162)
++    private val defaults = listOf<Int?>(108, 126, 144, 162, 180)
 +
 +    @Test
-+    fun `one boundary fills the blank rest at 50 60 70 80 90 percent of max`() {
-+        assertEquals(defaults, fillZoneBoundaries(none, listOf(null, null, 126, null, null), 2))
-+        assertEquals(defaults, fillZoneBoundaries(none, listOf(90, null, null, null, null), 0))
-+        assertEquals(defaults, fillZoneBoundaries(none, listOf(null, null, null, null, 162), 4))
++    fun `one box fills the blank rest at 60 70 80 90 100 percent of max`() {
++        assertEquals(defaults, fillZoneBoundaries(none, listOf(null, 126, null, null, null), 1))
++        assertEquals(defaults, fillZoneBoundaries(none, listOf(108, null, null, null, null), 0))
++        assertEquals(defaults, fillZoneBoundaries(none, listOf(null, null, null, null, 180), 4))
 +    }
 +
 +    @Test
-+    fun `changing one of an automatic set moves the whole set`() {
-+        // Max 190: 95, 114, 133, 152, 171
++    fun `zone 1 at 106 gives about 124 141 159 and 177`() {
++        // Max is 176.67, so the exact values are 123.67, 141.33, 159 and 176.67.
 +        assertEquals(
-+            listOf<Int?>(95, 114, 133, 152, 171),
-+            fillZoneBoundaries(defaults, listOf(90, 108, 133, 144, 162), 2)
++            listOf<Int?>(106, 124, 141, 159, 177),
++            fillZoneBoundaries(none, listOf(106, null, null, null, null), 0)
 +        )
 +    }
 +
 +    @Test
-+    fun `boundaries typed by hand are left alone`() {
-+        // 85 is not the automatic value for 126, so it stays; the automatic ones follow.
++    fun `changing one of an automatic set moves the whole set`() {
++        // Max 190: 114, 133, 152, 171, 190
 +        assertEquals(
-+            listOf<Int?>(85, 114, 133, 152, 171),
-+            fillZoneBoundaries(listOf(85, 108, 126, 144, 162), listOf(85, 108, 133, 144, 162), 2)
++            listOf<Int?>(114, 133, 152, 171, 190),
++            fillZoneBoundaries(defaults, listOf(108, 133, 144, 162, 180), 1)
++        )
++    }
++
++    @Test
++    fun `boxes typed by hand are left alone`() {
++        // 100 is not the automatic value for 126, so it stays; the automatic ones follow.
++        assertEquals(
++            listOf<Int?>(100, 133, 152, 171, 190),
++            fillZoneBoundaries(listOf(100, 126, 144, 162, 180), listOf(100, 133, 144, 162, 180), 1)
 +        )
 +    }
 +
@@ -964,10 +977,10 @@ index 0000000..c020bfb
 +
 +    @Test
 +    fun `tapping into a box without changing it recalculates nothing`() {
-+        // 160 was entered in the last box, giving 107 for zone 2. Tapping 107 must not move 160.
++        // 160 was entered in the last box, giving 96 for zone 1. Tapping 96 must not move 160.
 +        val filled = fillZoneBoundaries(none, listOf(null, null, null, null, 160), 4)
-+        assertEquals(listOf<Int?>(89, 107, 124, 142, 160), filled)
-+        assertEquals(filled, fillZoneBoundaries(filled, filled, 1))
++        assertEquals(listOf<Int?>(96, 112, 128, 144, 160), filled)
++        assertEquals(filled, fillZoneBoundaries(filled, filled, 0))
 +    }
 +}
 diff --git a/app/src/test/java/com/spop/poverlay/sensor/ScanBudgetTest.kt b/app/src/test/java/com/spop/poverlay/sensor/ScanBudgetTest.kt
