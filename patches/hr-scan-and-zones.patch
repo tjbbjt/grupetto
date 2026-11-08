@@ -1,45 +1,107 @@
 diff --git a/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt b/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
-index 5c18376..5b25b6e 100644
+index 5c18376..e05c6cb 100644
 --- a/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
 +++ b/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
-@@ -17,7 +17,7 @@ import org.junit.Test
+@@ -17,37 +17,39 @@ import org.junit.Test
  class HeartRateZoneSettingsTest {
      @get:Rule val compose = createComposeRule()
  
 -    @Test fun zoneLabelsUseSupportedTextAndKeepEditableBoundaries() {
-+    @Test fun zoneLabelsUseSupportedTextAndKeypadEditsBoundaries() {
++    @Test fun zoneBoxesAreLabelledAndKeypadEditsBoundaries() {
          var updated: List<Int?>? = null
          compose.setContent { MaterialTheme(typography = Typography) { Column {
-             HeartRateZoneSettings(listOf(108, 126, 144, 162)) { updated = it }
-@@ -25,10 +25,12 @@ class HeartRateZoneSettingsTest {
-         listOf("1 to 2", "2 to 3", "3 to 4", "4 to 5").forEach {
+-            HeartRateZoneSettings(listOf(108, 126, 144, 162)) { updated = it }
++            HeartRateZoneSettings(listOf(90, 108, 126, 144, 162)) { updated = it }
+         } } }
+-        listOf("1 to 2", "2 to 3", "3 to 4", "4 to 5").forEach {
++        listOf("Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5").forEach {
              compose.onNodeWithText(it).assertIsDisplayed()
          }
 -        compose.onNodeWithText("1 to 2").performTextReplacement("115")
-+        // The keypad only appears once a box is picked; the first key replaces the old number.
-+        compose.onNodeWithText("1 to 2").performClick()
-+        listOf("1", "1", "5").forEach { compose.onNodeWithText(it).performClick() }
-         compose.runOnIdle { assertEquals(listOf(115, 126, 144, 162), updated) }
+-        compose.runOnIdle { assertEquals(listOf(115, 126, 144, 162), updated) }
 -        compose.onNodeWithText("1 to 2").performTextClearance()
 -        compose.runOnIdle { assertEquals(listOf(null, 126, 144, 162), updated) }
++        // The keypad only appears once a box is picked; the first key replaces the old number.
++        compose.onNodeWithText("Zone 1").performClick()
++        listOf("1", "1", "5").forEach { compose.onNodeWithText(it).performClick() }
++        compose.runOnIdle { assertEquals(listOf(115, 108, 126, 144, 162), updated) }
 +        compose.onNodeWithText("Del").performClick()
-+        compose.runOnIdle { assertEquals(listOf(11, 126, 144, 162), updated) }
++        compose.runOnIdle { assertEquals(listOf(11, 108, 126, 144, 162), updated) }
      }
  
-     @Test fun boundariesWrapIntoTwoRowsOnNarrowDialogsAndStayInOneRowWhenWide() {
+-    @Test fun boundariesWrapIntoTwoRowsOnNarrowDialogsAndStayInOneRowWhenWide() {
+-        val width = mutableStateOf(280.dp)
++    @Test fun boxesWrapIntoTwoRowsOnNarrowDialogsAndStayInOneRowWhenWide() {
++        val width = mutableStateOf(360.dp)
+         compose.setContent { MaterialTheme(typography = Typography) {
+             Column(Modifier.requiredWidth(width.value)) {
+-                HeartRateZoneSettings(listOf(108, 126, 144, 162)) {}
++                HeartRateZoneSettings(listOf(90, 108, 126, 144, 162)) {}
+             }
+         } }
+         fun bounds(label: String) = compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot
+-        listOf("1 to 2", "2 to 3", "3 to 4", "4 to 5").forEach {
+-            compose.onNodeWithText(it).assertIsDisplayed().assertWidthIsAtLeast(130.dp)
++        listOf("Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5").forEach {
++            compose.onNodeWithText(it).assertIsDisplayed().assertWidthIsAtLeast(80.dp)
+         }
+-        assertEquals(bounds("1 to 2").top, bounds("2 to 3").top, 0f)
+-        assertEquals(bounds("3 to 4").top, bounds("4 to 5").top, 0f)
+-        assertTrue(bounds("3 to 4").top >= bounds("1 to 2").bottom)
+-        compose.runOnIdle { width.value = 560.dp }
+-        val firstTop = bounds("1 to 2").top
+-        listOf("2 to 3", "3 to 4", "4 to 5").forEach {
++        assertEquals(bounds("Zone 1").top, bounds("Zone 3").top, 0f)
++        assertEquals(bounds("Zone 4").top, bounds("Zone 5").top, 0f)
++        assertTrue(bounds("Zone 4").top >= bounds("Zone 1").bottom)
++        compose.runOnIdle { width.value = 700.dp }
++        val firstTop = bounds("Zone 1").top
++        listOf("Zone 2", "Zone 3", "Zone 4", "Zone 5").forEach {
+             assertEquals(firstTop, bounds(it).top, 0f)
+         }
+     }
+diff --git a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
+index 1973b24..514b1b5 100644
+--- a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
++++ b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
+@@ -524,6 +524,7 @@ private fun HeartRateManagerDialog(
+     var tab by remember { mutableStateOf(0) }
+     var page by remember { mutableStateOf(0) }
+     val bpm by HeartRateManager.heartRate.collectAsStateWithLifecycle()
++    val zone01 by HeartRateManager.zone01.collectAsStateWithLifecycle()
+     val zone12 by HeartRateManager.zone12.collectAsStateWithLifecycle()
+     val zone23 by HeartRateManager.zone23.collectAsStateWithLifecycle()
+     val zone34 by HeartRateManager.zone34.collectAsStateWithLifecycle()
+@@ -545,8 +546,15 @@ private fun HeartRateManagerDialog(
+         GrupettoTabs(tab, listOf("Discover", "Zones"), { tab = it; page = 0 })
+         Spacer(Modifier.height(12.dp))
+         if (tab == 1) {
+-            HeartRateZoneSettings(listOf(zone12, zone23, zone34, zone45)) { values ->
+-                HeartRateManager.setHeartRateZones(values[0], values[1], values[2], values[3])
++            val owner by HeartRateManager.zoneOwner.collectAsStateWithLifecycle()
++            val ownerName = savedDevices.firstOrNull { it.address == owner }?.let { it.name ?: it.address }
++            Text(
++                if (ownerName != null) "Heart rate zones for $ownerName" else "Heart rate zones",
++                fontWeight = FontWeight.SemiBold, color = Color(0xFF7DD3FC)
++            )
++            Spacer(Modifier.height(8.dp))
++            HeartRateZoneSettings(listOf(zone01, zone12, zone23, zone34, zone45)) { values ->
++                HeartRateManager.setHeartRateZones(values[0], values[1], values[2], values[3], values[4])
+             }
+         } else {
+             val devices = discoveredDevices.filter { candidate ->
 diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt
 new file mode 100644
-index 0000000..a62ad24
+index 0000000..1d13a2a
 --- /dev/null
 +++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneMath.kt
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,27 @@
 +package com.spop.poverlay
 +
-+import kotlin.math.abs
 +import kotlin.math.roundToInt
 +
-+/** Zone boundaries as a percentage of maximum heart rate: 1-2, 2-3, 3-4, 4-5. */
-+private val ZoneBoundaryPercents = listOf(60, 70, 80, 90)
++/** Where zones 1 to 5 start, as a percentage of maximum heart rate. */
++private val ZoneBoundaryPercents = listOf(50, 60, 70, 80, 90)
 +
 +private fun boundariesFrom(anchor: Int, anchorIndex: Int): List<Int> {
 +    val maxHeartRate = anchor * 100.0 / ZoneBoundaryPercents[anchorIndex]
@@ -47,36 +109,25 @@ index 0000000..a62ad24
 +}
 +
 +/**
-+ * Called after the boundary at [anchorIndex] was edited, with all four boundaries [before] and
-+ * [after] the edit. If that boundary did not change, nothing happens. Otherwise the others are
-+ * calculated from it at 60/70/80/90% of max heart rate:
-+ *  - blank boundaries are always filled in;
-+ *  - boundaries that were still the automatic values for the old number (give or take 1 bpm)
-+ *    follow the new number;
-+ *  - boundaries someone typed in by hand are left alone.
++ * Called after the boundary at [anchorIndex] was edited, with all five boundaries [before] and
++ * [after] the edit. If that boundary did not change, nothing happens. Otherwise every other
++ * boundary is recalculated from it at 50/60/70/80/90% of max heart rate, so the five always stay
++ * in increasing order.
 + */
 +internal fun fillZoneBoundaries(before: List<Int?>, after: List<Int?>, anchorIndex: Int): List<Int?> {
 +    if (before.size != ZoneBoundaryPercents.size || after.size != before.size) return after
 +    // Merely tapping into a box must not recalculate anything.
 +    if (before.getOrNull(anchorIndex) == after.getOrNull(anchorIndex)) return after
 +    val anchor = after.getOrNull(anchorIndex)?.takeIf { it > 0 } ?: return after
-+    val oldAnchor = before[anchorIndex]?.takeIf { it > 0 }
-+    val oldAuto = oldAnchor?.let { boundariesFrom(it, anchorIndex) }
-+    val newAuto = boundariesFrom(anchor, anchorIndex)
-+    return after.mapIndexed { index, value ->
-+        when {
-+            index == anchorIndex -> value
-+            value == null -> newAuto[index]
-+            oldAuto != null && abs(value - oldAuto[index]) <= 1 -> newAuto[index]
-+            else -> value
-+        }
++    return boundariesFrom(anchor, anchorIndex).mapIndexed { index, value ->
++        if (index == anchorIndex) anchor else value
 +    }
 +}
 diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-index c2f33a6..7fa6b47 100644
+index c2f33a6..b432475 100644
 --- a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
 +++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-@@ -1,36 +1,129 @@
+@@ -1,36 +1,120 @@
  package com.spop.poverlay
  
 +import androidx.compose.foundation.border
@@ -114,6 +165,7 @@ index c2f33a6..7fa6b47 100644
          mutableStateListOf(*stored.map { it?.toString() ?: "" }.toTypedArray())
      }
 -    BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+-        val columns = if (maxWidth >= 480.dp) 4 else 2
 +    var selectedIndex by remember { mutableStateOf(-1) }
 +    var valuesOnSelect by remember { mutableStateOf(stored) }
 +    // True until the first key press after picking a box: that press replaces the old number.
@@ -160,17 +212,8 @@ index c2f33a6..7fa6b47 100644
 +        }
 +    }
 +
-+    val entered = values.map { it.toIntOrNull() }
-+    if (entered.all { it != null } && entered.zipWithNext().any { (a, b) -> a!! >= b!! }) {
-+        Text(
-+            "Each boundary must be higher than the one before it, or zone colors are turned off.",
-+            modifier = Modifier.padding(bottom = 8.dp),
-+            color = Color(0xFFFB7185),
-+            fontSize = 14.sp,
-+        )
-+    }
 +    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-         val columns = if (maxWidth >= 480.dp) 4 else 2
++        val columns = if (maxWidth >= 600.dp) 5 else 3
          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
              values.indices.toList().chunked(columns).forEach { indices ->
                  Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -189,8 +232,8 @@ index c2f33a6..7fa6b47 100644
 +                                .clickable { select(index) }
 +                                .padding(horizontal = 12.dp, vertical = 8.dp),
 +                        ) {
-+                            // Use words: the bundled font does not contain the right-arrow glyph.
-+                            Text("${index + 1} to ${index + 2}", fontSize = 13.sp, color = if (selected) SelectedBorder else Color.Unspecified)
++                            // Each box is the heart rate where that zone starts: 50, 60, 70, 80 and 90% of max.
++                            Text("Zone ${index + 1}", fontSize = 13.sp, color = if (selected) SelectedBorder else Color.Unspecified)
 +                            Text(values[index].ifEmpty { "-" }, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
 +                        }
 +                    }
@@ -240,6 +283,24 @@ index 1e27e03..6609a65 100644
          val dialogViewModel = OverlayDialogViewModel(
              screenSize,
              sensorViewModel.isMinimized,
+diff --git a/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt b/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt
+index d1f2300..7be1141 100644
+--- a/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt
++++ b/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt
+@@ -108,10 +108,11 @@ fun Overlay(
+         if (bpm != null && bpm > 0 && zones != null) heartRateZoneColor(bpm, zones)
+         else MetricHeartRateColor
+     }
+-    val heartRateZoneBands = remember(heartRateZones) {
++    val zoneOneStart by HeartRateManager.zone01.collectAsStateWithLifecycle(initialValue = null)
++    val heartRateZoneBands = remember(heartRateZones, zoneOneStart) {
+         val zones = heartRateZones ?: return@remember null
+         listOf(
+-            ZoneBand(0f,          zones[0].toFloat(), HrZone1Color.copy(alpha = 0.3f).toArgb()),
++            ZoneBand((zoneOneStart ?: 0).toFloat().coerceAtMost(zones[0].toFloat()), zones[0].toFloat(), HrZone1Color.copy(alpha = 0.3f).toArgb()),
+             ZoneBand(zones[0].toFloat(), zones[1].toFloat(), HrZone2Color.copy(alpha = 0.3f).toArgb()),
+             ZoneBand(zones[1].toFloat(), zones[2].toFloat(), HrZone3Color.copy(alpha = 0.3f).toArgb()),
+             ZoneBand(zones[2].toFloat(), zones[3].toFloat(), HrZone4Color.copy(alpha = 0.3f).toArgb()),
 diff --git a/app/src/main/java/com/spop/poverlay/sensor/ScanBudget.kt b/app/src/main/java/com/spop/poverlay/sensor/ScanBudget.kt
 new file mode 100644
 index 0000000..072f55a
@@ -290,8 +351,25 @@ index 0000000..072f55a
 +        return true
 +    }
 +}
+diff --git a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateBluetoothAccess.kt b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateBluetoothAccess.kt
+index 3e59411..da6361b 100644
+--- a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateBluetoothAccess.kt
++++ b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateBluetoothAccess.kt
+@@ -82,10 +82,10 @@ internal class HeartRateBluetoothAccess(
+         }
+     }
+ 
+-    fun connect(device: BluetoothDevice, callback: BluetoothGattCallback): BluetoothGatt? {
++    fun connect(device: BluetoothDevice, callback: BluetoothGattCallback, autoConnect: Boolean = false): BluetoothGatt? {
+         if (!canConnect()) return null
+         return try {
+-            device.connectGatt(context, false, callback)
++            device.connectGatt(context, autoConnect, callback)
+         } catch (e: SecurityException) {
+             Timber.w(e, "HR connection permission was revoked")
+             null
 diff --git a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
-index 0b181bc..c96dcc5 100644
+index 0b181bc..afbe1fa 100644
 --- a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
 +++ b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
 @@ -11,6 +11,7 @@ import android.bluetooth.le.ScanSettings
@@ -302,13 +380,21 @@ index 0b181bc..c96dcc5 100644
  import com.spop.poverlay.sensor.shouldDiscoverSensor
  import androidx.core.content.edit
  import kotlinx.coroutines.CoroutineScope
-@@ -40,9 +41,15 @@ object HeartRateManager {
+@@ -34,15 +35,23 @@ object HeartRateManager {
+     private const val PrefSavedDevices = "hr_saved_devices"
+     private const val PrefSelectedDevice = "hr_selected_device"
+     private const val PrefNamePrefix = "hr_name_"
++    private const val PrefZone01 = "hr_zone_01"
+     private const val PrefZone12 = "hr_zone_12"
+     private const val PrefZone23 = "hr_zone_23"
+     private const val PrefZone34 = "hr_zone_34"
      private const val PrefZone45 = "hr_zone_45"
      private const val PrefMatchByName = "hr_match_by_name"
  
 -    private const val ReconnectDelayMs = 3_000L
 -    private const val AutoReconnectScanMs = 10_000L
 +    private const val ReconnectDelayMs = 1_000L
++    private const val DirectRetryMs = 2_000L
 +    // Each background scan runs this long at full speed, then restarts after ReconnectDelayMs.
 +    // Long enough to catch a strap that advertises slowly, short enough that Android never
 +    // demotes it to an opportunistic scan.
@@ -320,7 +406,25 @@ index 0b181bc..c96dcc5 100644
      // Android abandons a direct connectGatt after about 30 s; do not restart a
      // pending attempt to the same strap sooner. Straps already serving other
      // receivers can take several seconds to accept, and every restart cancels
-@@ -90,6 +97,9 @@ object HeartRateManager {
+@@ -50,6 +59,7 @@ object HeartRateManager {
+     private const val PendingConnectTimeoutMs = 30_000L
+ 
+     // Default zones based on 180 bpm max HR (typical 40-year-old), 10% bands
++    private const val DefaultZone01 = 90
+     private const val DefaultZone12 = 108
+     private const val DefaultZone23 = 126
+     private const val DefaultZone34 = 144
+@@ -82,6 +92,9 @@ object HeartRateManager {
+     private val _isScanning = MutableStateFlow(false)
+     val isScanning: StateFlow<Boolean> = _isScanning
+ 
++    private val _zone01 = MutableStateFlow<Int?>(null)
++    /** Where zone 1 starts; below it the heart rate is in no zone. */
++    val zone01: StateFlow<Int?> = _zone01
+     private val _zone12 = MutableStateFlow<Int?>(null)
+     private val _zone23 = MutableStateFlow<Int?>(null)
+     private val _zone34 = MutableStateFlow<Int?>(null)
+@@ -90,6 +103,9 @@ object HeartRateManager {
      val zone23: StateFlow<Int?> = _zone23
      val zone34: StateFlow<Int?> = _zone34
      val zone45: StateFlow<Int?> = _zone45
@@ -330,16 +434,33 @@ index 0b181bc..c96dcc5 100644
      private val _heartRateZones = MutableStateFlow<List<Int>?>(null)
      val heartRateZones: StateFlow<List<Int>?> = _heartRateZones
  
-@@ -123,6 +133,8 @@ object HeartRateManager {
+@@ -103,7 +119,7 @@ object HeartRateManager {
+ 
+     private fun connectionPending(address: String) =
+         bluetoothGatt != null && pendingAddress == address &&
+-            monotonicTimeMs() - pendingSinceMs < PendingConnectTimeoutMs
++            (pendingAutoConnect || monotonicTimeMs() - pendingSinceMs < PendingConnectTimeoutMs)
+ 
+     @Volatile
+     private var discoveryCallback: ScanCallback? = null
+@@ -123,6 +139,16 @@ object HeartRateManager {
      @Volatile
      private var manualDisconnectRequested = false
  
 +    private val scanBudget = ScanBudget()
 +
++    // True while the pending connection is an Android background connect (autoConnect). Android
++    // keeps it open until the strap appears, so it needs no timeout and no app-side scanning. The
++    // bike refuses scan results to the overlay when it is in the background, which made scanning
++    // for a saved strap unreliable.
++    @Volatile
++    private var pendingAutoConnect = false
++    private var nextDirectConnectAtMs = 0L
++
      @Volatile
      private var lastHeartRateAtMs: Long = 0L
  
-@@ -131,6 +143,16 @@ object HeartRateManager {
+@@ -131,6 +157,16 @@ object HeartRateManager {
  
      private fun monotonicTimeMs() = System.nanoTime() / 1_000_000L
  
@@ -356,7 +477,7 @@ index 0b181bc..c96dcc5 100644
      private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
  
      @Synchronized
-@@ -141,11 +163,13 @@ object HeartRateManager {
+@@ -141,11 +177,13 @@ object HeartRateManager {
              appContext = context.applicationContext
              bluetoothAccess = HeartRateBluetoothAccess(context.applicationContext)
              prefs = appContext?.getSharedPreferences(PrefsName, Context.MODE_PRIVATE)
@@ -371,7 +492,15 @@ index 0b181bc..c96dcc5 100644
              if (!manualDisconnectRequested) {
                  selectedAddress?.let { connectToAddress(it) }
              }
-@@ -191,20 +215,29 @@ object HeartRateManager {
+@@ -177,6 +215,7 @@ object HeartRateManager {
+         val gatt = bluetoothGatt
+         bluetoothGatt = null
+         pendingAddress = null
++        pendingAutoConnect = false
+         _connectingDevice.value = null
+         clearConnectionState()
+         if (gatt != null) {
+@@ -191,21 +230,33 @@ object HeartRateManager {
          return if (sharedPrefs.contains(key)) sharedPrefs.getInt(key, 0) else null
      }
  
@@ -387,6 +516,7 @@ index 0b181bc..c96dcc5 100644
 -        _zone34.value = readIntOrNull(PrefZone34) ?: DefaultZone34
 -        _zone45.value = readIntOrNull(PrefZone45) ?: DefaultZone45
 +        _zoneOwner.value = selectedAddress
++        _zone01.value = readZone(PrefZone01, DefaultZone01)
 +        _zone12.value = readZone(PrefZone12, DefaultZone12)
 +        _zone23.value = readZone(PrefZone23, DefaultZone23)
 +        _zone34.value = readZone(PrefZone34, DefaultZone34)
@@ -394,29 +524,33 @@ index 0b181bc..c96dcc5 100644
          updateHeartRateZones()
      }
  
+-    fun setHeartRateZones(zone12: Int?, zone23: Int?, zone34: Int?, zone45: Int?) {
 +    /** Saves zones for the selected monitor, or as the shared default when none is selected. */
-     fun setHeartRateZones(zone12: Int?, zone23: Int?, zone34: Int?, zone45: Int?) {
++    fun setHeartRateZones(zone01: Int?, zone12: Int?, zone23: Int?, zone34: Int?, zone45: Int?) {
 +        val owner = selectedAddress
          prefs?.edit {
 -            if (zone12 != null) putInt(PrefZone12, zone12) else remove(PrefZone12)
 -            if (zone23 != null) putInt(PrefZone23, zone23) else remove(PrefZone23)
 -            if (zone34 != null) putInt(PrefZone34, zone34) else remove(PrefZone34)
 -            if (zone45 != null) putInt(PrefZone45, zone45) else remove(PrefZone45)
++            if (zone01 != null) putInt(zoneKey(PrefZone01, owner), zone01) else remove(zoneKey(PrefZone01, owner))
 +            if (zone12 != null) putInt(zoneKey(PrefZone12, owner), zone12) else remove(zoneKey(PrefZone12, owner))
 +            if (zone23 != null) putInt(zoneKey(PrefZone23, owner), zone23) else remove(zoneKey(PrefZone23, owner))
 +            if (zone34 != null) putInt(zoneKey(PrefZone34, owner), zone34) else remove(zoneKey(PrefZone34, owner))
 +            if (zone45 != null) putInt(zoneKey(PrefZone45, owner), zone45) else remove(zoneKey(PrefZone45, owner))
          }
++        _zone01.value = zone01
          _zone12.value = zone12
          _zone23.value = zone23
-@@ -213,6 +246,17 @@ object HeartRateManager {
+         _zone34.value = zone34
+@@ -213,6 +264,17 @@ object HeartRateManager {
          updateHeartRateZones()
      }
  
 +    private fun copyZones(from: String, to: String) {
 +        val p = prefs ?: return
 +        p.edit {
-+            for (base in listOf(PrefZone12, PrefZone23, PrefZone34, PrefZone45)) {
++            for (base in listOf(PrefZone01, PrefZone12, PrefZone23, PrefZone34, PrefZone45)) {
 +                val key = zoneKey(base, from)
 +                if (p.contains(key)) putInt(zoneKey(base, to), p.getInt(key, 0))
 +                remove(key)
@@ -427,7 +561,7 @@ index 0b181bc..c96dcc5 100644
      fun setMatchByName(enabled: Boolean) {
          _matchByName.value = enabled
          prefs?.edit { putBoolean(PrefMatchByName, enabled) }
-@@ -233,10 +277,9 @@ object HeartRateManager {
+@@ -233,10 +295,9 @@ object HeartRateManager {
          }
      }
  
@@ -441,7 +575,7 @@ index 0b181bc..c96dcc5 100644
      @Synchronized
      fun startDiscovery(scanMode: Int = ScanSettings.SCAN_MODE_LOW_LATENCY) {
          if (!shouldScan()) { stopDiscovery(); updateIdleStatus(); return }
-@@ -258,7 +301,10 @@ object HeartRateManager {
+@@ -258,7 +319,10 @@ object HeartRateManager {
                      val hasHrService = result.scanRecord?.serviceUuids?.any { it.uuid == HR_SERVICE } == true
                      if (!hasHrService) return
                      val info = access.deviceInfo(device) ?: return
@@ -453,7 +587,7 @@ index 0b181bc..c96dcc5 100644
                      addDiscoveredDevice(info)
                  }
              }
-@@ -271,6 +317,7 @@ object HeartRateManager {
+@@ -271,6 +335,7 @@ object HeartRateManager {
                  synchronized(this@HeartRateManager) {
                      if (discoveryCallback !== this) return
                      discoveryCallback = null
@@ -461,7 +595,7 @@ index 0b181bc..c96dcc5 100644
                      nextScanAtMs = monotonicTimeMs() + ReconnectDelayMs
                      _isScanning.value = false
                      if (bluetoothGatt == null) _status.value = "Heart-rate scan failed ($errorCode) · retrying"
-@@ -280,6 +327,7 @@ object HeartRateManager {
+@@ -280,6 +345,7 @@ object HeartRateManager {
          }
  
          scanStartedAtMs = monotonicTimeMs()
@@ -469,7 +603,7 @@ index 0b181bc..c96dcc5 100644
          discoveryCallback = callback
          _isScanning.value = true
          if (bluetoothGatt == null) _status.value = selectedAddress?.let { "Searching for ${deviceName(it)}" }
-@@ -300,19 +348,37 @@ object HeartRateManager {
+@@ -300,20 +366,39 @@ object HeartRateManager {
          if (callback != null) bluetoothAccess?.stopScan(callback)
      }
  
@@ -485,7 +619,7 @@ index 0b181bc..c96dcc5 100644
 +        hrLog("bike moving after idle: new scan window, connected=${_connectedDevice.value != null} gatt=${bluetoothGatt != null}")
 +        if (stopped.get() || manualDisconnectRequested || _connectedDevice.value != null) return
 +        if (_savedDevices.value.isEmpty()) return
-+        if (bluetoothGatt != null) releaseCurrentGatt()
++        if (bluetoothGatt != null && !pendingAutoConnect) releaseCurrentGatt()
 +        stopDiscovery()
 +        nextScanAtMs = 0L
 +        startDiscovery(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -505,11 +639,14 @@ index 0b181bc..c96dcc5 100644
      private fun shouldScan() = shouldDiscoverSensor(
          running = !stopped.get(), pickerOpen = isManaging,
 -        hasSavedTarget = _savedDevices.value.isNotEmpty(),
+-        manuallyDisconnected = manualDisconnectRequested, hasGatt = bluetoothGatt != null
 +        hasSavedTarget = _savedDevices.value.isNotEmpty() && scanBudget.allows(monotonicTimeMs()),
-         manuallyDisconnected = manualDisconnectRequested, hasGatt = bluetoothGatt != null
++        manuallyDisconnected = manualDisconnectRequested,
++        hasGatt = bluetoothGatt != null && !pendingAutoConnect
      )
  
-@@ -323,6 +389,8 @@ object HeartRateManager {
+     @Synchronized
+@@ -323,6 +408,8 @@ object HeartRateManager {
          manualDisconnectRequested = false
          saveDevice(device)
          selectedAddress = device.address
@@ -518,7 +655,7 @@ index 0b181bc..c96dcc5 100644
          // Further scan results would otherwise restart this connection attempt.
          stopDiscovery()
          connectToAddress(device.address)
-@@ -333,6 +401,7 @@ object HeartRateManager {
+@@ -333,6 +420,7 @@ object HeartRateManager {
          manualDisconnectRequested = true
          stopDiscovery()
          selectedAddress = null
@@ -526,11 +663,11 @@ index 0b181bc..c96dcc5 100644
          prefs?.edit { remove(PrefSelectedDevice) }
          releaseCurrentGatt()
          _status.value = "Heart-rate monitor disconnected"
-@@ -346,10 +415,12 @@ object HeartRateManager {
+@@ -346,10 +434,12 @@ object HeartRateManager {
          p.edit {
              putStringSet(PrefSavedDevices, saved)
              remove(PrefNamePrefix + address)
-+            for (base in listOf(PrefZone12, PrefZone23, PrefZone34, PrefZone45)) remove(zoneKey(base, address))
++            for (base in listOf(PrefZone01, PrefZone12, PrefZone23, PrefZone34, PrefZone45)) remove(zoneKey(base, address))
              if (selectedAddress == address) remove(PrefSelectedDevice)
          }
          if (selectedAddress == address) {
@@ -539,7 +676,15 @@ index 0b181bc..c96dcc5 100644
              releaseCurrentGatt()
              _status.value = "No heart-rate monitor selected"
          }
-@@ -397,6 +468,7 @@ object HeartRateManager {
+@@ -392,11 +482,14 @@ object HeartRateManager {
+     @Synchronized
+     private fun maybeAutoConnectSaved(device: HeartRateDevice): Boolean {
+         if (manualDisconnectRequested) return false
+-        if (bluetoothGatt != null) return false
++        // A background connect to the last-used strap may be waiting; a scan hit on another saved
++        // strap (a second rider) takes over from it.
++        if (bluetoothGatt != null && !pendingAutoConnect) return false
+         val address = device.address
          // Exact MAC match
          if (_savedDevices.value.any { it.address == address }) {
              selectedAddress = address
@@ -547,7 +692,7 @@ index 0b181bc..c96dcc5 100644
              connectToAddress(address)
              stopDiscovery()
              return true
-@@ -410,6 +482,7 @@ object HeartRateManager {
+@@ -410,6 +503,7 @@ object HeartRateManager {
              } ?: return false
              updateSavedDeviceAddress(oldAddress = matched.address, newAddress = address, name = deviceName)
              selectedAddress = address
@@ -555,7 +700,7 @@ index 0b181bc..c96dcc5 100644
              connectToAddress(address)
              stopDiscovery()
              return true
-@@ -430,6 +503,7 @@ object HeartRateManager {
+@@ -430,6 +524,7 @@ object HeartRateManager {
              putString(PrefNamePrefix + newAddress, name)
              if (wasSelected) putString(PrefSelectedDevice, newAddress)
          }
@@ -563,7 +708,21 @@ index 0b181bc..c96dcc5 100644
          Timber.i("HR device name-matched '%s': updated address %s → %s", name, oldAddress, newAddress)
          loadSavedDevices()
          pruneDiscovered()
-@@ -463,13 +537,17 @@ object HeartRateManager {
+@@ -452,10 +547,12 @@ object HeartRateManager {
+         val device = access.remoteDevice(address)
+         if (device == null) { _status.value = "${deviceName(address)} unavailable · retrying"; return }
+         pendingAddress = address
++        pendingAutoConnect = !_matchByName.value && _savedDevices.value.any { it.address == address }
++        hrLog("connect $address autoConnect=$pendingAutoConnect")
+         _connectingDevice.value = HeartRateDevice(address, deviceName(address))
+         pendingSinceMs = monotonicTimeMs()
+         _status.value = "Connecting to ${deviceName(address)}"
+-        bluetoothGatt = access.connect(device, object : BluetoothGattCallback() {
++        bluetoothGatt = access.connect(device, autoConnect = pendingAutoConnect, callback = object : BluetoothGattCallback() {
+             private var lowPowerRequested = false
+ 
+             private fun connectionFailed(gatt: BluetoothGatt) {
+@@ -463,13 +560,18 @@ object HeartRateManager {
                      access.close(gatt)
                      return
                  }
@@ -571,6 +730,7 @@ index 0b181bc..c96dcc5 100644
                  releaseCurrentGatt()
 +                // A strap that is there but failed to connect or dropped gets a fresh five minutes.
 +                scanBudget.arm(monotonicTimeMs())
++                nextDirectConnectAtMs = monotonicTimeMs() + DirectRetryMs
                  _status.value = "Reconnecting to ${deviceName(address)}"
                  scheduleReconnect()
              }
@@ -581,7 +741,15 @@ index 0b181bc..c96dcc5 100644
                      if (bluetoothGatt !== gatt) {
                          access.close(gatt)
                          return
-@@ -503,6 +581,7 @@ object HeartRateManager {
+@@ -487,6 +589,7 @@ object HeartRateManager {
+                             }
+                             stopDiscovery()
+                             pendingAddress = null
++                            pendingAutoConnect = false
+                             _connectingDevice.value = null
+                             lastConnectedAtMs = monotonicTimeMs()
+                             val name = info.name ?: prefs?.getString(PrefNamePrefix + info.address, null)
+@@ -503,6 +606,7 @@ object HeartRateManager {
              override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
                  synchronized(this@HeartRateManager) {
                      if (bluetoothGatt !== gatt) return
@@ -589,7 +757,7 @@ index 0b181bc..c96dcc5 100644
                      if (status != BluetoothGatt.GATT_SUCCESS) { connectionFailed(gatt); return }
                      val desc = gatt.getService(HR_SERVICE)?.getCharacteristic(HR_MEASUREMENT)?.getDescriptor(CCC_UUID)
                      val characteristic = gatt.getService(HR_SERVICE)?.getCharacteristic(HR_MEASUREMENT)
-@@ -518,6 +597,7 @@ object HeartRateManager {
+@@ -518,6 +622,7 @@ object HeartRateManager {
              ) {
                  synchronized(this@HeartRateManager) {
                      if (bluetoothGatt !== gatt || descriptor.uuid != CCC_UUID) return
@@ -597,7 +765,7 @@ index 0b181bc..c96dcc5 100644
                      if (status != BluetoothGatt.GATT_SUCCESS) {
                          connectionFailed(gatt)
                          return
-@@ -547,6 +627,7 @@ object HeartRateManager {
+@@ -547,6 +652,7 @@ object HeartRateManager {
                          data[1].toInt() and 0xFF
                      }
                      if (bpm != null && bpm > 0) {
@@ -605,7 +773,7 @@ index 0b181bc..c96dcc5 100644
                          _heartRate.value = bpm
                          lastHeartRateAtMs = monotonicTimeMs()
                          _status.value = "Heart rate active"
-@@ -582,6 +663,9 @@ object HeartRateManager {
+@@ -582,6 +688,9 @@ object HeartRateManager {
              (manualDisconnectRequested || _savedDevices.value.isEmpty())) {
              _status.value = if (manualDisconnectRequested) "Heart-rate monitor disconnected"
                  else "No heart-rate monitor selected"
@@ -615,12 +783,13 @@ index 0b181bc..c96dcc5 100644
          }
      }
  
-@@ -598,9 +682,15 @@ object HeartRateManager {
+@@ -598,19 +707,33 @@ object HeartRateManager {
          if (bluetoothGatt != null) {
              val connected = _connectedDevice.value != null
              val lastSignal = if (connected) maxOf(lastHeartRateAtMs, lastConnectedAtMs) else pendingSinceMs
 -            val timeout = if (connected) StaleHeartRateTimeoutMs else PendingConnectTimeoutMs
 +            val timeout = when {
++                !connected && pendingAutoConnect -> Long.MAX_VALUE
 +                !connected -> PendingConnectTimeoutMs
 +                lastHeartRateAtMs == 0L -> FirstReadingTimeoutMs
 +                else -> StaleHeartRateTimeoutMs
@@ -630,9 +799,18 @@ index 0b181bc..c96dcc5 100644
                  releaseCurrentGatt()
 +                if (connected) scanBudget.arm(now)
                  nextScanAtMs = now + ReconnectDelayMs
++                nextDirectConnectAtMs = now + DirectRetryMs
                  _status.value = "Heart-rate data lost · reconnecting"
              }
-@@ -610,7 +700,7 @@ object HeartRateManager {
+         }
++        // Wait for the last-used saved strap with a background connect: no scan permission needed.
++        val target = selectedAddress
++        if (bluetoothGatt == null && target != null && !manualDisconnectRequested && !_matchByName.value &&
++            _savedDevices.value.any { it.address == target } && now >= nextDirectConnectAtMs) {
++            connectToAddress(target)
++        }
+         if (!shouldScan()) { stopDiscovery(); updateIdleStatus(); return }
+         if (_isScanning.value && now - scanStartedAtMs >= AutoReconnectScanMs) {
              stopDiscovery()
              nextScanAtMs = now + ReconnectDelayMs
          } else if (!_isScanning.value && now >= nextScanAtMs) {
@@ -721,48 +899,47 @@ index 9a4f9ab..7d74e42 100644
              nextReconnectAt = clock() + 5000
 diff --git a/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt b/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt
 new file mode 100644
-index 0000000..2fac8bd
+index 0000000..a779d40
 --- /dev/null
 +++ b/app/src/test/java/com/spop/poverlay/HeartRateZoneMathTest.kt
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,54 @@
 +package com.spop.poverlay
 +
 +import org.junit.Assert.assertEquals
 +import org.junit.Test
 +
 +class HeartRateZoneMathTest {
-+    private val none = listOf<Int?>(null, null, null, null)
-+    private val defaults = listOf<Int?>(108, 126, 144, 162)
++    private val none = listOf<Int?>(null, null, null, null, null)
++    private val defaults = listOf<Int?>(90, 108, 126, 144, 162)
 +
 +    @Test
-+    fun `one boundary fills the blank rest at 60 70 80 90 percent of max`() {
-+        assertEquals(defaults, fillZoneBoundaries(none, listOf(null, 126, null, null), 1))
-+        assertEquals(defaults, fillZoneBoundaries(none, listOf(108, null, null, null), 0))
-+        assertEquals(defaults, fillZoneBoundaries(none, listOf(null, null, null, 162), 3))
++    fun `one boundary fills the blank rest at 50 60 70 80 90 percent of max`() {
++        assertEquals(defaults, fillZoneBoundaries(none, listOf(null, null, 126, null, null), 2))
++        assertEquals(defaults, fillZoneBoundaries(none, listOf(90, null, null, null, null), 0))
++        assertEquals(defaults, fillZoneBoundaries(none, listOf(null, null, null, null, 162), 4))
 +    }
 +
 +    @Test
-+    fun `changing one of an automatic set moves the whole set`() {
-+        // Max 190: 114, 133, 152, 171
++    fun `changing one box moves the whole set`() {
++        // Max 190: 95, 114, 133, 152, 171
 +        assertEquals(
-+            listOf<Int?>(114, 133, 152, 171),
-+            fillZoneBoundaries(defaults, listOf(108, 133, 144, 162), 1)
++            listOf<Int?>(95, 114, 133, 152, 171),
++            fillZoneBoundaries(defaults, listOf(90, 108, 133, 144, 162), 2)
 +        )
 +    }
 +
 +    @Test
-+    fun `boundaries typed by hand are left alone`() {
-+        // 100 is not the automatic value for 126, so it stays; the automatic ones follow.
++    fun `editing one box recalculates all the others even custom ones`() {
 +        assertEquals(
-+            listOf<Int?>(100, 133, 152, 171),
-+            fillZoneBoundaries(listOf(100, 126, 144, 162), listOf(100, 133, 144, 162), 1)
++            listOf<Int?>(95, 114, 133, 152, 171),
++            fillZoneBoundaries(listOf(85, 108, 126, 144, 162), listOf(85, 108, 133, 144, 162), 2)
 +        )
 +    }
 +
 +    @Test
 +    fun `blank or zero anchor changes nothing`() {
 +        assertEquals(none, fillZoneBoundaries(none, none, 2))
-+        val zero = listOf<Int?>(0, null, null, null)
++        val zero = listOf<Int?>(0, null, null, null, null)
 +        assertEquals(zero, fillZoneBoundaries(none, zero, 0))
 +    }
 +
@@ -774,10 +951,10 @@ index 0000000..2fac8bd
 +
 +    @Test
 +    fun `tapping into a box without changing it recalculates nothing`() {
-+        // 160 was entered in the last box, giving 107 for the first. Tapping 107 must not move 160.
-+        val filled = fillZoneBoundaries(none, listOf(null, null, null, 160), 3)
-+        assertEquals(listOf<Int?>(107, 124, 142, 160), filled)
-+        assertEquals(filled, fillZoneBoundaries(filled, filled, 0))
++        // 160 was entered in the last box, giving 107 for zone 2. Tapping 107 must not move 160.
++        val filled = fillZoneBoundaries(none, listOf(null, null, null, null, 160), 4)
++        assertEquals(listOf<Int?>(89, 107, 124, 142, 160), filled)
++        assertEquals(filled, fillZoneBoundaries(filled, filled, 1))
 +    }
 +}
 diff --git a/app/src/test/java/com/spop/poverlay/sensor/ScanBudgetTest.kt b/app/src/test/java/com/spop/poverlay/sensor/ScanBudgetTest.kt
