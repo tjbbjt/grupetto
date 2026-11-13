@@ -228,6 +228,16 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                 viewModel::restoreAutomaticBikeService, viewModel::requestBikeDiscoveryReport)
         }
         "sensors" -> SettingsDialog("External Sensors", { dialog = null }) {
+            if (!background) {
+                // Android only lets an app find Bluetooth sensors while it is on screen unless location
+                // is set to "Allow all the time", so saved sensors would not reconnect during a ride.
+                Text("Sensors can only reconnect while you ride if location is set to \"Allow all the time\".",
+                    fontSize = 13.sp, color = Color(0xFFFBBF24))
+                OutlinedButton(viewModel::onRequestBackgroundLocationClicked, Modifier.fillMaxWidth()) {
+                    Text("Allow location all the time")
+                }
+                Divider(Modifier.padding(vertical = 12.dp))
+            }
             SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Pair a heart-rate monitor",
                 bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
             OutlinedButton({ dialog = "heart" }, Modifier.fillMaxWidth()) { Text("Heart-rate monitors & zones") }

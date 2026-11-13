@@ -193,6 +193,12 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(RequestMultiplePermissions()) { permissions ->
             val allGranted = permissions.values.all { it }
             viewModel.onBluetoothPermissionsResult(allGranted)
+            // The runtime dialog only offers "while using the app". Saved sensors can reconnect during
+            // a ride only with "Allow all the time", so ask for that right after the first grant.
+            val fineLocation = androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (fineLocation && !hasBackgroundLocation()) requestBackgroundLocationPermission()
         }
 
     private val batteryOptimizationRequest =
@@ -204,6 +210,29 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(RequestPermission()) { granted ->
             viewModel.onBackgroundLocationPermissionResult(granted)
         }
+
+    private fun hasBackgroundLocation() = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Opens this app's own location permission page, which has "Allow all the time". That page is
+     * Android's internal permission screen, so not every build lets apps open it; if it refuses,
+     * fall back to the app info page (Permissions, then Location).
+     */
+    private fun openAppSettings() {
+        try {
+            startActivity(
+                Intent("android.intent.action.MANAGE_APP_PERMISSION")
+                    .putExtra("android.intent.extra.PACKAGE_NAME", packageName)
+                    .putExtra("android.intent.extra.PERMISSION_GROUP_NAME", "android.permission-group.LOCATION")
+                    .putExtra("android.intent.extra.USER", android.os.Process.myUserHandle())
+            )
+        } catch (e: Exception) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
+    }
 
     private fun requestScreenPermission() = Intent(
         "android.settings.action.MANAGE_OVERLAY_PERMISSION",
@@ -217,10 +246,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestBackgroundLocationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || hasBackgroundLocation()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ grants "Allow all the time" through the app's settings page.
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 11+ never offers "Allow all the time" in a pop-up; it is only in settings, so go
+            // straight to the app's location permission page (like the overlay permission screen).
+            android.widget.Toast.makeText(
+                this,
+                "Choose \"Allow all the time\" so heart-rate monitors and power meters reconnect during a ride.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            openAppSettings()
+        } else {
             backgroundLocationPermissionRequest.launch(
                 android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
             )

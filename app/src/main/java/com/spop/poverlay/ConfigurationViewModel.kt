@@ -328,6 +328,12 @@ class ConfigurationViewModel(
         infoPopup.postValue(msg)
     }
 
+    /** Asks Android for "Allow all the time" location (the activity explains it with a short message). */
+    fun onRequestBackgroundLocationClicked() {
+        if (isPreview) return
+        requestBackgroundLocationPermission.postValue(Unit)
+    }
+
     fun onAutoStartOnBootClicked(isChecked: Boolean) {
         configurationRepository.setAutoStartOnBoot(isChecked)
         if (!isPreview && isChecked && !hasBackgroundLocationPermission()) {
