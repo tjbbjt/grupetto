@@ -1,26 +1,25 @@
 diff --git a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
-index 1973b24..4dc7b38 100644
+index 1973b24..af355d3 100644
 --- a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
 +++ b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
-@@ -86,11 +86,17 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
+@@ -86,8 +86,15 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
      var previewShifters by remember { mutableStateOf(false) }
      var developerTaps by remember { mutableStateOf(0) }
      var lastDeveloperTap by remember { mutableStateOf(0L) }
 +    var locationPageSkipped by remember { mutableStateOf(false) }
      Box(Modifier.fillMaxSize().padding(16.dp)) {
-         if (permission) {
+-        if (permission) {
++        // Location comes first, where Android's location pop-up used to appear, then the overlay.
++        if (!background && !locationPageSkipped && !viewModel.isPreview) {
++            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
++                LocationPermissionPage(viewModel::onRequestBackgroundLocationClicked,
++                    { locationPageSkipped = true; viewModel.onLocationPageSkipped() }, UiScale(.7f))
++            }
++        } else if (permission) {
              Column(Modifier.align(Alignment.Center)) {
                  PermissionPage(viewModel::onGrantPermissionClicked, UiScale(.7f))
              }
-+        } else if (!background && !locationPageSkipped && !viewModel.isPreview) {
-+            Column(Modifier.align(Alignment.Center)) {
-+                LocationPermissionPage(viewModel::onRequestBackgroundLocationClicked,
-+                    { locationPageSkipped = true }, UiScale(.7f))
-+            }
-         } else {
-             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-@@ -228,6 +234,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
+@@ -228,6 +235,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                  viewModel::restoreAutomaticBikeService, viewModel::requestBikeDiscoveryReport)
          }
          "sensors" -> SettingsDialog("External Sensors", { dialog = null }) {
@@ -28,7 +27,7 @@ index 1973b24..4dc7b38 100644
              SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Pair a heart-rate monitor",
                  bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
              OutlinedButton({ dialog = "heart" }, Modifier.fillMaxWidth()) { Text("Heart-rate monitors & zones") }
-@@ -331,7 +338,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
+@@ -331,7 +339,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
          "heart" -> HeartRateManagerDialog(hr, discovered, saved, scanning, match,
              viewModel::startHeartRateDiscovery, viewModel::stopHeartRateDiscovery,
              viewModel::connectHeartRateDevice, viewModel::disconnectHeartRateDevice,
@@ -38,7 +37,7 @@ index 1973b24..4dc7b38 100644
          "about" -> SettingsDialog("About Grupetto", { dialog = null }) {
              Text("Version ${BuildConfig.VERSION_NAME} · Android ${Build.VERSION.RELEASE}")
              Text("Device: ${Build.MODEL}", fontSize = 14.sp)
-@@ -369,6 +377,19 @@ private fun TileActionButton(label: String, onClick: () -> Unit, modifier: Modif
+@@ -369,6 +378,19 @@ private fun TileActionButton(label: String, onClick: () -> Unit, modifier: Modif
      }
  }
  
@@ -58,37 +57,38 @@ index 1973b24..4dc7b38 100644
  @Composable
  private fun SettingSwitch(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
      Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-@@ -506,6 +527,29 @@ private fun PermissionPage(onClickedGrantPermission: () -> Unit, uiScale: UiScal
+@@ -506,6 +528,30 @@ private fun PermissionPage(onClickedGrantPermission: () -> Unit, uiScale: UiScal
      Button(onClick = onClickedGrantPermission) { Text(text = "Grant Permission") }
  }
  
-+/** Shown after the overlay permission until location is "Allow all the time" (or skipped for now). */
++/** Shown first, before the overlay permission, until location is "Allow all the time" (or skipped for now). */
 +@Composable
 +private fun LocationPermissionPage(onAllow: () -> Unit, onSkip: () -> Unit, uiScale: UiScale) {
 +    Text(
-+            text = "Grupetto Needs Location \"Allow All The Time\"",
++            text = "Grupetto Needs Location\n\"Allow All The Time\"",
 +            fontSize = uiScale.sp(40f),
 +            fontStyle = FontStyle.Italic,
-+            fontWeight = FontWeight.Bold
-+    )
-+    Text(
-+            text = "Android only lets apps find Bluetooth sensors in the background with this setting, so " +
-+                "heart-rate monitors and power meters can reconnect during a ride. Tap the button, then " +
-+                "open Permissions, Location, and choose Allow all the time.",
-+            fontSize = uiScale.sp(20f),
-+            fontWeight = FontWeight.Normal
++            fontWeight = FontWeight.Bold,
++            textAlign = androidx.compose.ui.text.style.TextAlign.Center
 +    )
 +    Spacer(modifier = Modifier.height(uiScale.dp(10f)))
-+    Row(horizontalArrangement = Arrangement.spacedBy(uiScale.dp(12f))) {
-+        Button(onClick = onAllow) { Text(text = "Open Location Settings") }
-+        TextButton(onClick = onSkip) { Text(text = "Not Now") }
-+    }
++    Text(
++            text = "Android only lets apps find Bluetooth sensors in the background with this setting.\n" +
++                "It lets heart-rate monitors and power meters reconnect during a ride.",
++            fontSize = uiScale.sp(20f),
++            fontWeight = FontWeight.Normal,
++            textAlign = androidx.compose.ui.text.style.TextAlign.Center
++    )
++    Spacer(modifier = Modifier.height(uiScale.dp(16f)))
++    Button(onClick = onAllow) { Text(text = "Grant Location Permission") }
++    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
++    TextButton(onClick = onSkip) { Text(text = "Not Now") }
 +}
 +
  @Composable
  private fun HeartRateManagerDialog(
      connectedDevice: HeartRateDevice?,
-@@ -519,6 +563,8 @@ private fun HeartRateManagerDialog(
+@@ -519,6 +565,8 @@ private fun HeartRateManagerDialog(
      onDisconnectConnectedDevice: () -> Unit,
      onForgetDevice: (String) -> Unit,
      onSetMatchByName: (Boolean) -> Unit,
@@ -97,7 +97,7 @@ index 1973b24..4dc7b38 100644
      onDismiss: () -> Unit
  ) {
      var tab by remember { mutableStateOf(0) }
-@@ -531,6 +577,7 @@ private fun HeartRateManagerDialog(
+@@ -531,6 +579,7 @@ private fun HeartRateManagerDialog(
      val connecting by HeartRateManager.connectingDevice.collectAsStateWithLifecycle()
      SensorPickerScanEffect(tab == 0, HeartRateManager::setManaging)
      SettingsDialog("Heart rate", onDismiss, scrollable = true) {
@@ -106,10 +106,10 @@ index 1973b24..4dc7b38 100644
              Column(Modifier.weight(1f)) {
                  Text(connectedDevice?.name ?: connectedDevice?.address ?: "No monitor connected",
 diff --git a/app/src/main/java/com/spop/poverlay/ConfigurationViewModel.kt b/app/src/main/java/com/spop/poverlay/ConfigurationViewModel.kt
-index 5974a3e..b59091e 100644
+index 5974a3e..9208e64 100644
 --- a/app/src/main/java/com/spop/poverlay/ConfigurationViewModel.kt
 +++ b/app/src/main/java/com/spop/poverlay/ConfigurationViewModel.kt
-@@ -328,6 +328,12 @@ class ConfigurationViewModel(
+@@ -328,6 +328,20 @@ class ConfigurationViewModel(
          infoPopup.postValue(msg)
      }
  
@@ -119,22 +119,57 @@ index 5974a3e..b59091e 100644
 +        requestBackgroundLocationPermission.postValue(Unit)
 +    }
 +
++    /** "Not now" on the location page: fall back to the normal Bluetooth/location pop-up. */
++    fun onLocationPageSkipped() {
++        if (isPreview) return
++        if (bleTxEnabled.value && !hasBluetoothPermissions()) {
++            requestBluetoothPermissions.value = getRequiredBluetoothPermissions()
++        }
++    }
++
      fun onAutoStartOnBootClicked(isChecked: Boolean) {
          configurationRepository.setAutoStartOnBoot(isChecked)
          if (!isPreview && isChecked && !hasBackgroundLocationPermission()) {
+@@ -534,7 +548,10 @@ class ConfigurationViewModel(
+         }
+         if (isPreview) return
+         syncOutboundTransports()
+-        if (bleTxEnabled.value && !hasBluetoothPermissions()) {
++        // On Android 11 and below the only pop-up here is location, which the location page asks for
++        // (so it can go straight on to "Allow all the time"); don't ask twice at launch.
++        val locationPageWillAsk = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && !hasBackgroundLocationPermission()
++        if (bleTxEnabled.value && !hasBluetoothPermissions() && !locationPageWillAsk) {
+             val permissions = getRequiredBluetoothPermissions()
+             requestBluetoothPermissions.value = permissions
+         } else if ((bleTxEnabled.value || dirConEnabled.value) &&
 diff --git a/app/src/main/java/com/spop/poverlay/MainActivity.kt b/app/src/main/java/com/spop/poverlay/MainActivity.kt
-index 3d31642..275e97a 100644
+index 3d31642..1991000 100644
 --- a/app/src/main/java/com/spop/poverlay/MainActivity.kt
 +++ b/app/src/main/java/com/spop/poverlay/MainActivity.kt
-@@ -200,11 +200,26 @@ class MainActivity : ComponentActivity() {
+@@ -200,11 +200,41 @@ class MainActivity : ComponentActivity() {
              viewModel.onBatteryOptimizationRequestCompleted()
          }
  
 +    private var backgroundRequestStartedAt = 0L
++    // Set when "while using" was just granted from the location button; Bluetooth starts once the
++    // "all the time" step is answered, so the battery prompt does not cover the location page.
++    private var startBluetoothAfterLocation = false
++
++    private val foregroundLocationRequest =
++        registerForActivityResult(RequestPermission()) { granted ->
++            if (granted) {
++                startBluetoothAfterLocation = true
++                requestBackgroundLocationPermission()
++            }
++        }
 +
      private val backgroundLocationPermissionRequest =
          registerForActivityResult(RequestPermission()) { granted ->
              viewModel.onBackgroundLocationPermissionResult(granted)
++            if (startBluetoothAfterLocation) {
++                startBluetoothAfterLocation = false
++                viewModel.onBluetoothPermissionsResult(true)
++            }
 +            // If Android answered at once without showing its location page, use the app info page.
 +            val answeredInstantly = android.os.SystemClock.elapsedRealtime() - backgroundRequestStartedAt < 700
 +            if (!granted && answeredInstantly && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) openAppSettings()
@@ -153,10 +188,18 @@ index 3d31642..275e97a 100644
      private fun requestScreenPermission() = Intent(
          "android.settings.action.MANAGE_OVERLAY_PERMISSION",
          Uri.parse("package:${packageName}")
-@@ -217,10 +232,18 @@ class MainActivity : ComponentActivity() {
+@@ -217,10 +247,26 @@ class MainActivity : ComponentActivity() {
      }
  
      private fun requestBackgroundLocationPermission() {
++        val hasForeground = androidx.core.content.ContextCompat.checkSelfPermission(
++            this, android.Manifest.permission.ACCESS_FINE_LOCATION
++        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
++        // Android asks for "while using the app" first; "all the time" can only follow it.
++        if (!hasForeground) {
++            foregroundLocationRequest.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
++            return
++        }
 +        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || hasBackgroundLocation()) return
          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
 -            // Android 11+ grants "Allow all the time" through the app's settings page.

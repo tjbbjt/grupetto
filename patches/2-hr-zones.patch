@@ -61,10 +61,10 @@ index 5c18376..bfe9abc 100644
          }
      }
 diff --git a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
-index 4dc7b38..dc49e38 100644
+index af355d3..ce10568 100644
 --- a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
 +++ b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
-@@ -574,6 +574,7 @@ private fun HeartRateManagerDialog(
+@@ -576,6 +576,7 @@ private fun HeartRateManagerDialog(
      val zone23 by HeartRateManager.zone23.collectAsStateWithLifecycle()
      val zone34 by HeartRateManager.zone34.collectAsStateWithLifecycle()
      val zone45 by HeartRateManager.zone45.collectAsStateWithLifecycle()
@@ -72,7 +72,7 @@ index 4dc7b38..dc49e38 100644
      val connecting by HeartRateManager.connectingDevice.collectAsStateWithLifecycle()
      SensorPickerScanEffect(tab == 0, HeartRateManager::setManaging)
      SettingsDialog("Heart rate", onDismiss, scrollable = true) {
-@@ -592,8 +593,15 @@ private fun HeartRateManagerDialog(
+@@ -594,8 +595,15 @@ private fun HeartRateManagerDialog(
          GrupettoTabs(tab, listOf("Discover", "Zones"), { tab = it; page = 0 })
          Spacer(Modifier.height(12.dp))
          if (tab == 1) {
