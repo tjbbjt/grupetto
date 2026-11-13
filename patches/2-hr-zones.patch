@@ -1,8 +1,8 @@
 diff --git a/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt b/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
-index 5c18376..bfe9abc 100644
+index 5c18376..4c61c25 100644
 --- a/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
 +++ b/app/src/androidTest/java/com/spop/poverlay/HeartRateZoneSettingsTest.kt
-@@ -17,37 +17,39 @@ import org.junit.Test
+@@ -17,37 +17,41 @@ import org.junit.Test
  class HeartRateZoneSettingsTest {
      @get:Rule val compose = createComposeRule()
  
@@ -21,8 +21,10 @@ index 5c18376..bfe9abc 100644
 -        compose.runOnIdle { assertEquals(listOf(115, 126, 144, 162), updated) }
 -        compose.onNodeWithText("1 to 2").performTextClearance()
 -        compose.runOnIdle { assertEquals(listOf(null, 126, 144, 162), updated) }
-+        // The keypad only appears once a box is picked; the first key replaces the old number.
++        // The keypad only appears once a box is picked; Del removes one digit at a time.
 +        compose.onNodeWithText("Zone 1").performClick()
++        repeat(3) { compose.onNodeWithText("Del").performClick() }
++        compose.runOnIdle { assertEquals(listOf(null, 126, 144, 162, 180), updated) }
 +        listOf("1", "1", "5").forEach { compose.onNodeWithText(it).performClick() }
 +        compose.runOnIdle { assertEquals(listOf(115, 126, 144, 162, 180), updated) }
 +        compose.onNodeWithText("Del").performClick()
@@ -136,12 +138,18 @@ index 0000000..7857082
 +    }
 +}
 diff --git a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-index c2f33a6..73d8634 100644
+index c2f33a6..7df4fd2 100644
 --- a/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
 +++ b/app/src/main/java/com/spop/poverlay/HeartRateZoneSettings.kt
-@@ -1,36 +1,120 @@
+@@ -1,39 +1,154 @@
  package com.spop.poverlay
  
++import androidx.compose.animation.core.RepeatMode
++import androidx.compose.animation.core.infiniteRepeatable
++import androidx.compose.animation.core.keyframes
++import androidx.compose.animation.core.rememberInfiniteTransition
++import androidx.compose.animation.core.animateFloat
++import androidx.compose.foundation.background
 +import androidx.compose.foundation.border
 +import androidx.compose.foundation.clickable
  import androidx.compose.foundation.layout.*
@@ -152,6 +160,7 @@ index c2f33a6..73d8634 100644
  import androidx.compose.runtime.*
 +import androidx.compose.ui.Alignment
  import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.alpha
 +import androidx.compose.ui.graphics.Color
  import androidx.compose.ui.text.font.FontWeight
 -import androidx.compose.ui.text.input.KeyboardType
@@ -180,8 +189,6 @@ index c2f33a6..73d8634 100644
 -        val columns = if (maxWidth >= 480.dp) 4 else 2
 +    var selectedIndex by remember { mutableStateOf(-1) }
 +    var valuesOnSelect by remember { mutableStateOf(stored) }
-+    // True until the first key press after picking a box: that press replaces the old number.
-+    var fresh by remember { mutableStateOf(false) }
 +
 +    // Fills in the other boundaries from the box at [index], once editing it is finished.
 +    fun commit(index: Int) {
@@ -197,22 +204,22 @@ index c2f33a6..73d8634 100644
 +        if (selectedIndex >= 0) commit(selectedIndex)
 +        selectedIndex = index
 +        valuesOnSelect = values.map { it.toIntOrNull() }
-+        fresh = true
 +    }
 +
 +    fun typeDigit(digit: Char) {
 +        val i = selectedIndex
 +        if (i < 0) return
-+        values[i] = (if (fresh) "" else values[i]).plus(digit).take(3)
-+        fresh = false
++        // Digits are added at the cursor, which sits after the last digit; three digits at most.
++        if (values[i].length >= 3) return
++        values[i] = values[i] + digit
 +        onChange(values.map { it.toIntOrNull() })
 +    }
 +
 +    fun backspace() {
 +        val i = selectedIndex
 +        if (i < 0) return
-+        values[i] = if (fresh) "" else values[i].dropLast(1)
-+        fresh = false
++        // One digit at a time.
++        values[i] = values[i].dropLast(1)
 +        onChange(values.map { it.toIntOrNull() })
 +    }
 +
@@ -246,13 +253,18 @@ index c2f33a6..73d8634 100644
 +                        ) {
 +                            // Each box is the top of that zone: 60, 70, 80, 90 and 100% of max heart rate.
 +                            Text("Zone ${index + 1}", fontSize = 13.sp, color = if (selected) SelectedBorder else Color.Unspecified)
-+                            Text(values[index].ifEmpty { "-" }, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
++                            Row(verticalAlignment = Alignment.CenterVertically) {
++                                if (values[index].isNotEmpty() || !selected) {
++                                    Text(values[index].ifEmpty { "-" }, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
++                                }
++                                if (selected) BlinkingCursor()
++                            }
 +                        }
-+                    }
-+                }
-+            }
-+        }
-+    }
+                     }
+                 }
+             }
+         }
+     }
 +    if (selectedIndex >= 0) {
 +        // One compact row so the whole zone screen stays on screen without scrolling.
 +        val rows = listOf(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "Del", "Done"))
@@ -272,9 +284,33 @@ index c2f33a6..73d8634 100644
 +                                },
 +                            contentAlignment = Alignment.Center,
 +                        ) { Text(key, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
-                     }
-                 }
-             }
++                    }
++                }
++            }
++        }
++    }
++}
++
++/** A text cursor that blinks once a second, shown after the digits of the box being edited. */
++@Composable
++private fun BlinkingCursor() {
++    val blink = rememberInfiniteTransition()
++    val alpha by blink.animateFloat(
++        initialValue = 1f,
++        targetValue = 0f,
++        animationSpec = infiniteRepeatable(
++            animation = keyframes {
++                durationMillis = 1000
++                1f at 0
++                1f at 499
++                0f at 500
++                0f at 999
++            },
++            repeatMode = RepeatMode.Restart,
++        ),
++    )
++    Box(Modifier.padding(start = 2.dp).width(2.dp).height(26.dp).alpha(alpha).background(SelectedBorder))
+ }
 diff --git a/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt b/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt
 index d1f2300..98f03d5 100644
 --- a/app/src/main/java/com/spop/poverlay/overlay/composables/Overlay.kt
