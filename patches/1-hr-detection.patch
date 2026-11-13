@@ -1,8 +1,26 @@
 diff --git a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
-index 1973b24..6be29d3 100644
+index 1973b24..4dc7b38 100644
 --- a/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
 +++ b/app/src/main/java/com/spop/poverlay/ConfigurationPage.kt
-@@ -228,6 +228,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
+@@ -86,11 +86,17 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
+     var previewShifters by remember { mutableStateOf(false) }
+     var developerTaps by remember { mutableStateOf(0) }
+     var lastDeveloperTap by remember { mutableStateOf(0L) }
++    var locationPageSkipped by remember { mutableStateOf(false) }
+     Box(Modifier.fillMaxSize().padding(16.dp)) {
+         if (permission) {
+             Column(Modifier.align(Alignment.Center)) {
+                 PermissionPage(viewModel::onGrantPermissionClicked, UiScale(.7f))
+             }
++        } else if (!background && !locationPageSkipped && !viewModel.isPreview) {
++            Column(Modifier.align(Alignment.Center)) {
++                LocationPermissionPage(viewModel::onRequestBackgroundLocationClicked,
++                    { locationPageSkipped = true }, UiScale(.7f))
++            }
+         } else {
+             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+@@ -228,6 +234,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                  viewModel::restoreAutomaticBikeService, viewModel::requestBikeDiscoveryReport)
          }
          "sensors" -> SettingsDialog("External Sensors", { dialog = null }) {
@@ -10,7 +28,7 @@ index 1973b24..6be29d3 100644
              SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Pair a heart-rate monitor",
                  bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
              OutlinedButton({ dialog = "heart" }, Modifier.fillMaxWidth()) { Text("Heart-rate monitors & zones") }
-@@ -331,7 +332,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
+@@ -331,7 +338,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
          "heart" -> HeartRateManagerDialog(hr, discovered, saved, scanning, match,
              viewModel::startHeartRateDiscovery, viewModel::stopHeartRateDiscovery,
              viewModel::connectHeartRateDevice, viewModel::disconnectHeartRateDevice,
@@ -20,7 +38,7 @@ index 1973b24..6be29d3 100644
          "about" -> SettingsDialog("About Grupetto", { dialog = null }) {
              Text("Version ${BuildConfig.VERSION_NAME} · Android ${Build.VERSION.RELEASE}")
              Text("Device: ${Build.MODEL}", fontSize = 14.sp)
-@@ -369,6 +371,19 @@ private fun TileActionButton(label: String, onClick: () -> Unit, modifier: Modif
+@@ -369,6 +377,19 @@ private fun TileActionButton(label: String, onClick: () -> Unit, modifier: Modif
      }
  }
  
@@ -40,7 +58,37 @@ index 1973b24..6be29d3 100644
  @Composable
  private fun SettingSwitch(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
      Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-@@ -519,6 +534,8 @@ private fun HeartRateManagerDialog(
+@@ -506,6 +527,29 @@ private fun PermissionPage(onClickedGrantPermission: () -> Unit, uiScale: UiScal
+     Button(onClick = onClickedGrantPermission) { Text(text = "Grant Permission") }
+ }
+ 
++/** Shown after the overlay permission until location is "Allow all the time" (or skipped for now). */
++@Composable
++private fun LocationPermissionPage(onAllow: () -> Unit, onSkip: () -> Unit, uiScale: UiScale) {
++    Text(
++            text = "Grupetto Needs Location \"Allow All The Time\"",
++            fontSize = uiScale.sp(40f),
++            fontStyle = FontStyle.Italic,
++            fontWeight = FontWeight.Bold
++    )
++    Text(
++            text = "Android only lets apps find Bluetooth sensors in the background with this setting, so " +
++                "heart-rate monitors and power meters can reconnect during a ride. Tap the button, then " +
++                "open Permissions, Location, and choose Allow all the time.",
++            fontSize = uiScale.sp(20f),
++            fontWeight = FontWeight.Normal
++    )
++    Spacer(modifier = Modifier.height(uiScale.dp(10f)))
++    Row(horizontalArrangement = Arrangement.spacedBy(uiScale.dp(12f))) {
++        Button(onClick = onAllow) { Text(text = "Open Location Settings") }
++        TextButton(onClick = onSkip) { Text(text = "Not Now") }
++    }
++}
++
+ @Composable
+ private fun HeartRateManagerDialog(
+     connectedDevice: HeartRateDevice?,
+@@ -519,6 +563,8 @@ private fun HeartRateManagerDialog(
      onDisconnectConnectedDevice: () -> Unit,
      onForgetDevice: (String) -> Unit,
      onSetMatchByName: (Boolean) -> Unit,
@@ -49,7 +97,7 @@ index 1973b24..6be29d3 100644
      onDismiss: () -> Unit
  ) {
      var tab by remember { mutableStateOf(0) }
-@@ -531,6 +548,7 @@ private fun HeartRateManagerDialog(
+@@ -531,6 +577,7 @@ private fun HeartRateManagerDialog(
      val connecting by HeartRateManager.connectingDevice.collectAsStateWithLifecycle()
      SensorPickerScanEffect(tab == 0, HeartRateManager::setManaging)
      SettingsDialog("Heart rate", onDismiss, scrollable = true) {
@@ -75,23 +123,10 @@ index 5974a3e..b59091e 100644
          configurationRepository.setAutoStartOnBoot(isChecked)
          if (!isPreview && isChecked && !hasBackgroundLocationPermission()) {
 diff --git a/app/src/main/java/com/spop/poverlay/MainActivity.kt b/app/src/main/java/com/spop/poverlay/MainActivity.kt
-index 3d31642..8fc3b2d 100644
+index 3d31642..16a67ba 100644
 --- a/app/src/main/java/com/spop/poverlay/MainActivity.kt
 +++ b/app/src/main/java/com/spop/poverlay/MainActivity.kt
-@@ -193,6 +193,12 @@ class MainActivity : ComponentActivity() {
-         registerForActivityResult(RequestMultiplePermissions()) { permissions ->
-             val allGranted = permissions.values.all { it }
-             viewModel.onBluetoothPermissionsResult(allGranted)
-+            // The runtime dialog only offers "while using the app". Saved sensors can reconnect during
-+            // a ride only with "Allow all the time", so ask for that right after the first grant.
-+            val fineLocation = androidx.core.content.ContextCompat.checkSelfPermission(
-+                this, android.Manifest.permission.ACCESS_FINE_LOCATION
-+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-+            if (fineLocation && !hasBackgroundLocation()) requestBackgroundLocationPermission()
-         }
- 
-     private val batteryOptimizationRequest =
-@@ -205,6 +211,16 @@ class MainActivity : ComponentActivity() {
+@@ -205,6 +205,16 @@ class MainActivity : ComponentActivity() {
              viewModel.onBackgroundLocationPermissionResult(granted)
          }
  
@@ -108,7 +143,7 @@ index 3d31642..8fc3b2d 100644
      private fun requestScreenPermission() = Intent(
          "android.settings.action.MANAGE_OVERLAY_PERMISSION",
          Uri.parse("package:${packageName}")
-@@ -217,10 +233,16 @@ class MainActivity : ComponentActivity() {
+@@ -217,10 +227,16 @@ class MainActivity : ComponentActivity() {
      }
  
      private fun requestBackgroundLocationPermission() {
