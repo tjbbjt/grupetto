@@ -75,7 +75,7 @@ index 5974a3e..b59091e 100644
          configurationRepository.setAutoStartOnBoot(isChecked)
          if (!isPreview && isChecked && !hasBackgroundLocationPermission()) {
 diff --git a/app/src/main/java/com/spop/poverlay/MainActivity.kt b/app/src/main/java/com/spop/poverlay/MainActivity.kt
-index 3d31642..b7b51ff 100644
+index 3d31642..8fc3b2d 100644
 --- a/app/src/main/java/com/spop/poverlay/MainActivity.kt
 +++ b/app/src/main/java/com/spop/poverlay/MainActivity.kt
 @@ -193,6 +193,12 @@ class MainActivity : ComponentActivity() {
@@ -91,26 +91,24 @@ index 3d31642..b7b51ff 100644
          }
  
      private val batteryOptimizationRequest =
-@@ -205,22 +211,27 @@ class MainActivity : ComponentActivity() {
+@@ -205,6 +211,16 @@ class MainActivity : ComponentActivity() {
              viewModel.onBackgroundLocationPermissionResult(granted)
          }
  
--    private fun requestScreenPermission() = Intent(
--        "android.settings.action.MANAGE_OVERLAY_PERMISSION",
--        Uri.parse("package:${packageName}")
--    ).apply {
--        overlayPermissionRequest.launch(this)
--    }
 +    private fun hasBackgroundLocation() = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
 +        androidx.core.content.ContextCompat.checkSelfPermission(
 +            this, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
 +        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
- 
--    private fun requestBluetoothPermissions(permissions: Array<String>) {
--        bluetoothPermissionRequest.launch(permissions)
++
 +    /** Opens this app's settings page (Permissions, then Location, has "Allow all the time"). */
 +    private fun openAppSettings() {
 +        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
++    }
++
+     private fun requestScreenPermission() = Intent(
+         "android.settings.action.MANAGE_OVERLAY_PERMISSION",
+         Uri.parse("package:${packageName}")
+@@ -217,10 +233,16 @@ class MainActivity : ComponentActivity() {
      }
  
      private fun requestBackgroundLocationPermission() {
