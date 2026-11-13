@@ -123,11 +123,21 @@ index 5974a3e..b59091e 100644
          configurationRepository.setAutoStartOnBoot(isChecked)
          if (!isPreview && isChecked && !hasBackgroundLocationPermission()) {
 diff --git a/app/src/main/java/com/spop/poverlay/MainActivity.kt b/app/src/main/java/com/spop/poverlay/MainActivity.kt
-index 3d31642..16a67ba 100644
+index 3d31642..275e97a 100644
 --- a/app/src/main/java/com/spop/poverlay/MainActivity.kt
 +++ b/app/src/main/java/com/spop/poverlay/MainActivity.kt
-@@ -205,6 +205,16 @@ class MainActivity : ComponentActivity() {
+@@ -200,11 +200,26 @@ class MainActivity : ComponentActivity() {
+             viewModel.onBatteryOptimizationRequestCompleted()
+         }
+ 
++    private var backgroundRequestStartedAt = 0L
++
+     private val backgroundLocationPermissionRequest =
+         registerForActivityResult(RequestPermission()) { granted ->
              viewModel.onBackgroundLocationPermissionResult(granted)
++            // If Android answered at once without showing its location page, use the app info page.
++            val answeredInstantly = android.os.SystemClock.elapsedRealtime() - backgroundRequestStartedAt < 700
++            if (!granted && answeredInstantly && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) openAppSettings()
          }
  
 +    private fun hasBackgroundLocation() = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
@@ -143,7 +153,7 @@ index 3d31642..16a67ba 100644
      private fun requestScreenPermission() = Intent(
          "android.settings.action.MANAGE_OVERLAY_PERMISSION",
          Uri.parse("package:${packageName}")
-@@ -217,10 +227,16 @@ class MainActivity : ComponentActivity() {
+@@ -217,10 +232,18 @@ class MainActivity : ComponentActivity() {
      }
  
      private fun requestBackgroundLocationPermission() {
@@ -152,13 +162,15 @@ index 3d31642..16a67ba 100644
 -            // Android 11+ grants "Allow all the time" through the app's settings page.
 -            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
 -        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-+            // Android 11+ never offers "Allow all the time" in a pop-up; it is only in the app's settings.
++            // On Android 11+ asking for background location on its own (once "while using" is granted)
++            // should open this app's location page, which has "Allow all the time".
 +            android.widget.Toast.makeText(
 +                this,
-+                "Open Permissions, then Location, and choose \"Allow all the time\" so heart-rate monitors and power meters reconnect during a ride.",
++                "Choose \"Allow all the time\" so heart-rate monitors and power meters reconnect during a ride.",
 +                android.widget.Toast.LENGTH_LONG
 +            ).show()
-+            openAppSettings()
++            backgroundRequestStartedAt = android.os.SystemClock.elapsedRealtime()
++            backgroundLocationPermissionRequest.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
 +        } else {
              backgroundLocationPermissionRequest.launch(
                  android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
