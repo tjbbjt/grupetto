@@ -85,6 +85,21 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      - name: Use Google's Maven Central mirror
+        if: steps.patch.outputs.already != 'true'
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/mirror.gradle <<'EOF'
+          // Maven Central rate-limits GitHub's shared machines (429 Too Many Requests).
+          // Check Google's copy of Maven Central first; anything not there falls through
+          // to the project's own repositories.
+          def mirror = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          beforeSettings { settings ->
+              settings.pluginManagement.repositories { maven { url mirror } }
+              settings.dependencyResolutionManagement.repositories { maven { url mirror } }
+          }
+          EOF
+
       - name: Set up signing
         if: steps.patch.outputs.already != 'true'
         working-directory: src
@@ -124,7 +139,14 @@ jobs:
         working-directory: src
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest --tests '*CyclingPowerWheelTimeTest' --tests '*HeartRateZoneMathTest' --continue
+          # Only name test classes that exist in this build (a patch may be skipped or merged upstream).
+          args=()
+          for T in CyclingPowerWheelTimeTest HeartRateZoneMathTest ScanBudgetTest; do
+            if find app/src/test -name "$T.kt" | grep -q .; then args+=(--tests "*$T"); fi
+          done
+          if [ "${#args[@]}" -gt 0 ]; then
+            ./gradlew testDebugUnitTest "${args[@]}" --continue
+          fi
 
       - name: Build release APK
         if: steps.patch.outputs.already != 'true'
@@ -143,4 +165,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "Grupetto ${{ steps.up.outputs.upstream }} + fork patches (build ${{ github.run_number }})" \
-            --notes "Upstream ${{ steps.up.outputs.upstream }} plus the patches in patches/: heart-rate strap reconnect scanning and heart-rate zone auto-fill. Built automatically."
+            --notes "Upstream ${{ steps.up.outputs.upstream }} plus the patches in patches/: heart-rate strap reconnect and heart-rate zones. Built automatically."
