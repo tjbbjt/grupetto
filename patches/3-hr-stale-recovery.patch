@@ -1,0 +1,296 @@
+diff --git a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
+index 69ec167..a4dbe40 100644
+--- a/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
++++ b/app/src/main/java/com/spop/poverlay/sensor/heartrate/HeartRateManager.kt
+@@ -148,6 +148,39 @@ object HeartRateManager {
+ 
+     private fun monotonicTimeMs() = System.nanoTime() / 1_000_000L
+ 
++    private fun hrLog(message: String) = Timber.i("HR: %s", message)
++
++    // How long the current GATT may go without progress: a pending connect, a first reading and
++    // an established stream of readings each have their own limit.
++    private fun gattStaleTimeoutMs() = when {
++        _connectedDevice.value == null -> PendingConnectTimeoutMs
++        lastHeartRateAtMs == 0L -> FirstReadingTimeoutMs
++        else -> StaleHeartRateTimeoutMs
++    }
++
++    private fun gattLastSignalMs() =
++        if (_connectedDevice.value != null) maxOf(lastHeartRateAtMs, lastConnectedAtMs) else pendingSinceMs
++
++    private fun isGattStale(now: Long) =
++        bluetoothGatt != null && now - gattLastSignalMs() > gattStaleTimeoutMs()
++
++    // Log why the search is idle, once per change, so a "never reconnected" report can be explained.
++    private var lastIdleReason: String? = null
++
++    private fun logIdleReason() {
++        val reason = when {
++            manualDisconnectRequested -> "manual disconnect"
++            _savedDevices.value.isEmpty() -> "no saved monitor"
++            !scanBudget.allows(monotonicTimeMs()) -> "search paused after idle"
++            bluetoothGatt != null -> "a connection owns the sensor"
++            else -> "not wanted"
++        }
++        if (reason != lastIdleReason) {
++            lastIdleReason = reason
++            hrLog("not searching: $reason")
++        }
++    }
++
+     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+ 
+     @Synchronized
+@@ -314,12 +347,14 @@ object HeartRateManager {
+                     nextScanAtMs = monotonicTimeMs() + ReconnectDelayMs
+                     _isScanning.value = false
+                     if (bluetoothGatt == null) _status.value = "Heart-rate scan failed ($errorCode) · retrying"
++                    hrLog("scan failed, error $errorCode")
+                     Timber.w("HR scan failed: %s", errorCode)
+                 }
+             }
+         }
+ 
+         scanStartedAtMs = monotonicTimeMs()
++        lastIdleReason = null
+         discoveryCallback = callback
+         _isScanning.value = true
+         if (bluetoothGatt == null) _status.value = selectedAddress?.let { "Searching for ${deviceName(it)}" }
+@@ -329,6 +364,9 @@ object HeartRateManager {
+             nextScanAtMs = monotonicTimeMs() + ReconnectDelayMs
+             _isScanning.value = false
+             if (bluetoothGatt == null) _status.value = "Bluetooth scan unavailable · retrying"
++            hrLog("scan could not start")
++        } else {
++            hrLog("scan started")
+         }
+     }
+ 
+@@ -337,7 +375,10 @@ object HeartRateManager {
+         val callback = discoveryCallback
+         discoveryCallback = null
+         _isScanning.value = false
+-        if (callback != null) bluetoothAccess?.stopScan(callback)
++        if (callback != null) {
++            hrLog("scan stopped")
++            bluetoothAccess?.stopScan(callback)
++        }
+     }
+ 
+     /**
+@@ -351,6 +392,8 @@ object HeartRateManager {
+         if (!scanBudget.onMovement(moving, monotonicTimeMs())) return
+         if (stopped.get() || manualDisconnectRequested || _connectedDevice.value != null) return
+         if (_savedDevices.value.isEmpty()) return
++        hrLog("bike moving again: searching for the saved monitor")
++        startAutoReconnectScan()
+         if (bluetoothGatt != null) releaseCurrentGatt()
+         stopDiscovery()
+         nextScanAtMs = 0L
+@@ -362,6 +405,7 @@ object HeartRateManager {
+     fun setManaging(active: Boolean) {
+         if (isManaging == active) return
+         isManaging = active
++        startAutoReconnectScan()
+         stopDiscovery()
+         if (shouldScan()) startDiscovery(ScanSettings.SCAN_MODE_LOW_LATENCY)
+         else updateIdleStatus()
+@@ -376,8 +420,17 @@ object HeartRateManager {
+ 
+     @Synchronized
+     fun connectTo(device: HeartRateDevice) {
+-        // A stale picker tap must not replace the sensor already owning this type.
+-        if (bluetoothGatt != null) return
++        // A stale picker tap must not replace the sensor already owning this type. A connection
++        // that has stopped making progress owns nothing, so it must never swallow a tap.
++        if (bluetoothGatt != null) {
++            if (!isGattStale(monotonicTimeMs())) {
++                hrLog("tap on ${device.address} ignored: a live connection owns the sensor")
++                return
++            }
++            hrLog("tap on ${device.address} replaces a connection that stopped responding")
++            releaseCurrentGatt()
++        }
++        hrLog("tap on ${device.address}: connecting")
+         manualDisconnectRequested = false
+         saveDevice(device)
+         selectedAddress = device.address
+@@ -385,11 +438,13 @@ object HeartRateManager {
+         scanBudget.arm(monotonicTimeMs())
+         // Further scan results would otherwise restart this connection attempt.
+         stopDiscovery()
++        startAutoReconnectScan()
+         connectToAddress(device.address)
+     }
+ 
+     @Synchronized
+     fun disconnectCurrent() {
++        hrLog("manual disconnect")
+         manualDisconnectRequested = true
+         stopDiscovery()
+         selectedAddress = null
+@@ -459,6 +514,7 @@ object HeartRateManager {
+         val address = device.address
+         // Exact MAC match
+         if (_savedDevices.value.any { it.address == address }) {
++            hrLog("saved monitor $address seen in scan")
+             selectedAddress = address
+             loadHeartRateZones()
+             connectToAddress(address)
+@@ -472,6 +528,7 @@ object HeartRateManager {
+             val matched = _savedDevices.value.firstOrNull {
+                 !it.name.isNullOrBlank() && it.name == deviceName
+             } ?: return false
++            hrLog("saved monitor matched by name, address ${matched.address} -> $address")
+             updateSavedDeviceAddress(oldAddress = matched.address, newAddress = address, name = deviceName)
+             selectedAddress = address
+             loadHeartRateZones()
+@@ -511,7 +568,11 @@ object HeartRateManager {
+     @Synchronized
+     private fun connectToAddress(address: String) {
+         val access = bluetoothAccess ?: return
+-        if (connectionPending(address) || _connectedDevice.value?.address == address) return
++        if (connectionPending(address) || _connectedDevice.value?.address == address) {
++            hrLog("connect to $address skipped: already pending or connected")
++            return
++        }
++        hrLog("connecting to $address")
+         stopDiscovery()
+         releaseCurrentGatt()
+         if (!access.canConnect()) { _status.value = "Bluetooth permission required"; return }
+@@ -524,11 +585,12 @@ object HeartRateManager {
+         bluetoothGatt = access.connect(device, object : BluetoothGattCallback() {
+             private var lowPowerRequested = false
+ 
+-            private fun connectionFailed(gatt: BluetoothGatt) {
++            private fun connectionFailed(gatt: BluetoothGatt, reason: String) {
+                 if (bluetoothGatt !== gatt) {
+                     access.close(gatt)
+                     return
+                 }
++                hrLog("connection to $address ended: $reason")
+                 releaseCurrentGatt()
+                 // A strap that failed to connect or dropped is searched for again straight away.
+                 scanBudget.arm(monotonicTimeMs())
+@@ -543,16 +605,17 @@ object HeartRateManager {
+                         return
+                     }
+                     if (status != BluetoothGatt.GATT_SUCCESS) {
+-                        connectionFailed(gatt)
++                        connectionFailed(gatt, "GATT status $status, state $newState")
+                         return
+                     }
+                     when (newState) {
+                         BluetoothProfile.STATE_CONNECTED -> {
+                             val info = access.deviceInfo(device)
+                             if (info == null || !access.discoverServices(gatt)) {
+-                                connectionFailed(gatt)
++                                connectionFailed(gatt, "service discovery could not start")
+                                 return
+                             }
++                            hrLog("connected to $address, discovering services")
+                             stopDiscovery()
+                             pendingAddress = null
+                             _connectingDevice.value = null
+@@ -562,7 +625,7 @@ object HeartRateManager {
+                             _status.value = "Connected · waiting for heart rate"
+                         }
+                         BluetoothProfile.STATE_DISCONNECTED -> {
+-                            connectionFailed(gatt)
++                            connectionFailed(gatt, "disconnected")
+                         }
+                     }
+                 }
+@@ -571,11 +634,19 @@ object HeartRateManager {
+             override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                 synchronized(this@HeartRateManager) {
+                     if (bluetoothGatt !== gatt) return
+-                    if (status != BluetoothGatt.GATT_SUCCESS) { connectionFailed(gatt); return }
++                    if (status != BluetoothGatt.GATT_SUCCESS) {
++                        connectionFailed(gatt, "service discovery status $status")
++                        return
++                    }
+                     val desc = gatt.getService(HR_SERVICE)?.getCharacteristic(HR_MEASUREMENT)?.getDescriptor(CCC_UUID)
+                     val characteristic = gatt.getService(HR_SERVICE)?.getCharacteristic(HR_MEASUREMENT)
+-                    if (desc == null || characteristic == null) { connectionFailed(gatt); return }
+-                    if (!access.enableNotifications(gatt, characteristic, desc)) connectionFailed(gatt)
++                    if (desc == null || characteristic == null) {
++                        connectionFailed(gatt, "no heart-rate characteristic")
++                        return
++                    }
++                    if (!access.enableNotifications(gatt, characteristic, desc)) {
++                        connectionFailed(gatt, "notifications refused")
++                    }
+                 }
+             }
+ 
+@@ -587,9 +658,10 @@ object HeartRateManager {
+                 synchronized(this@HeartRateManager) {
+                     if (bluetoothGatt !== gatt || descriptor.uuid != CCC_UUID) return
+                     if (status != BluetoothGatt.GATT_SUCCESS) {
+-                        connectionFailed(gatt)
++                        connectionFailed(gatt, "descriptor write status $status")
+                         return
+                     }
++                    hrLog("notifications enabled for $address")
+                     if (!lowPowerRequested) {
+                         lowPowerRequested = true
+                         access.requestLowPowerConnection(gatt)
+@@ -601,7 +673,7 @@ object HeartRateManager {
+                 synchronized(this@HeartRateManager) {
+                     if (bluetoothGatt !== gatt) return
+                     if (!access.canConnect()) {
+-                        connectionFailed(gatt)
++                        connectionFailed(gatt, "Bluetooth permission lost")
+                         return
+                     }
+                     if (characteristic.uuid != HR_MEASUREMENT) return
+@@ -615,6 +687,7 @@ object HeartRateManager {
+                         data[1].toInt() and 0xFF
+                     }
+                     if (bpm != null && bpm > 0) {
++                        if (lastHeartRateAtMs == 0L) hrLog("first heart-rate reading from $address")
+                         _heartRate.value = bpm
+                         lastHeartRateAtMs = monotonicTimeMs()
+                         _status.value = "Heart rate active"
+@@ -639,7 +712,13 @@ object HeartRateManager {
+         if (stopped.get() || autoReconnectJob?.isActive == true) return
+         autoReconnectJob = scope.launch {
+             while (!stopped.get()) {
+-                checkConnection()
++                // One bad pass must not end the watchdog: with it gone, nothing would ever
++                // recover a connection that stopped responding.
++                try {
++                    checkConnection()
++                } catch (e: Exception) {
++                    Timber.w(e, "HR watchdog pass failed")
++                }
+                 delay(1_000L)
+             }
+         }
+@@ -668,20 +747,16 @@ object HeartRateManager {
+         }
+         if (bluetoothGatt != null) {
+             val connected = _connectedDevice.value != null
+-            val lastSignal = if (connected) maxOf(lastHeartRateAtMs, lastConnectedAtMs) else pendingSinceMs
+-            val timeout = when {
+-                !connected -> PendingConnectTimeoutMs
+-                lastHeartRateAtMs == 0L -> FirstReadingTimeoutMs
+-                else -> StaleHeartRateTimeoutMs
+-            }
+-            if (now - lastSignal > timeout) {
++            if (isGattStale(now)) {
++                hrLog("watchdog: ${if (connected) "connected" else "pending"} link silent for " +
++                    "${(now - gattLastSignalMs()) / 1000}s, releasing it")
+                 releaseCurrentGatt()
+                 if (connected) scanBudget.arm(now)
+                 nextScanAtMs = now + ReconnectDelayMs
+                 _status.value = "Heart-rate data lost · reconnecting"
+             }
+         }
+-        if (!shouldScan()) { stopDiscovery(); updateIdleStatus(); return }
++        if (!shouldScan()) { stopDiscovery(); updateIdleStatus(); logIdleReason(); return }
+         if (_isScanning.value && now - scanStartedAtMs >= AutoReconnectScanMs) {
+             stopDiscovery()
+             nextScanAtMs = now + ReconnectDelayMs
